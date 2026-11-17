@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f4f4f6">
   <title>Privatnavigator</title>
   <link rel="manifest" href="/manifest.webmanifest">
@@ -12,9 +12,10 @@
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <header><div class="wrap"><a class="brand" href="/"><img src="/navigator-192.png" width="32" height="32" alt="">Privatnavigator</a><nav aria-label="Bereiche"><a href="#planner">Suche</a><a href="#saved-trips">Meine Fahrten</a><button id="open-settings" type="button">Einstellungen</button></nav></div></header>
+  <header><div class="wrap"><a class="brand" href="#suche"><img src="/navigator-192.png" width="28" height="28" alt="">Privatnavigator</a></div></header>
   <main class="wrap">
-    <h1>Verbindung suchen</h1>
+    <section id="search-view" aria-labelledby="search-title">
+    <h1 id="search-title">Verbindung suchen</h1>
     <form id="planner" class="panel">
       <div class="route">
         <div class="place">
@@ -35,7 +36,7 @@
       </div>
       <div class="when">
         <label>Suchzeit<select id="direction"><option value="false">Abfahrt</option><option value="true">Ankunft</option></select></label>
-        <label>Datum und Uhrzeit<input id="time" type="datetime-local" required></label>
+        <label class="time-field">Datum und Uhrzeit<input id="time" type="datetime-local" required></label>
         <button type="button" id="now">Jetzt</button>
       </div>
       <div class="actions">
@@ -62,8 +63,9 @@
       <div id="journeys"></div>
       <button type="button" id="later-trips" class="trip-page" hidden>↓ Spätere Verbindungen</button>
     </section>
-    <section id="saved-trips" aria-labelledby="saved-title">
-      <h2 id="saved-title">Meine Fahrten</h2>
+    </section>
+    <section id="saved-trips" aria-labelledby="saved-title" hidden>
+      <h1 id="saved-title">Meine Fahrten</h1>
       <p id="saved-empty" class="muted">Gespeicherte Einzelverbindungen findest du hier.</p>
       <p id="saved-status" role="status" hidden></p>
       <div id="saved-items"></div>
@@ -81,10 +83,48 @@
         <p id="transfer-status" role="status" hidden></p>
       </details>
     </section>
+    <section id="settings" aria-labelledby="settings-title" hidden>
+    <h1 id="settings-title">Einstellungen</h1>
+    <div class="panel">
+      <h2>Transitous-API</h2>
+      <p id="usage-status" role="status"></p>
+      <div id="usage-report" hidden>
+        <div class="usage-total"><strong id="usage-total"></strong><span>letzte 24 Stunden</span></div>
+        <progress id="usage-limit" aria-label="Verbrauchtes API-Budget"></progress>
+        <p id="usage-today"></p>
+        <p class="muted">Die App begrenzt alle Transitous-Anfragen dieser Installation zusammen auf 720 in 24 Stunden. Transitous nennt 720 für bestimmte Routing-Endpunkte als Schwelle zur Abstimmung.</p>
+        <h3>Aufrufe pro Tag · letzte 14 Tage</h3>
+        <ul class="usage-legend" aria-label="Diagrammlegende">
+          <li class="usage-places">Ortsvorschläge</li>
+          <li class="usage-routes">Verbindungen</li>
+          <li class="usage-updates">Fahrtupdates</li>
+        </ul>
+        <ol id="usage-history" class="usage-history"></ol>
+      </div>
+      <button id="reload-usage" type="button">Statistik aktualisieren</button>
+    </div>
+    </section>
   </main>
+  <footer class="wrap">Fahrplandaten von <a href="https://transitous.org/sources/">Transitous</a> · Kartendaten von <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap-Mitwirkenden</a></footer>
+  <nav class="bottom-nav" aria-label="App-Bereiche">
+    <div class="wrap nav-items">
+      <a href="#suche" data-view="search-view" aria-current="page">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+        <span>Suche</span>
+      </a>
+      <a href="#saved-trips" data-view="saved-trips">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="15" rx="3"/><path d="M5 12h14M8 18.5l-2 2.5m10-2.5 2 2.5M9 15.5h.1m5.9 0h.1"/></svg>
+        <span>Meine Fahrten</span>
+      </a>
+      <a href="#settings" data-view="settings">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/><path class="nav-knobs" d="M9 4v4m6 2v4m-5 2v4"/></svg>
+        <span>Einstellungen</span>
+      </a>
+    </div>
+  </nav>
   <dialog id="search-filters" aria-labelledby="filter-title">
     <form id="filter-form">
-      <h2 id="filter-title">Suchoptionen</h2>
+      <h2 id="filter-title" tabindex="-1" autofocus>Suchoptionen</h2>
       <label class="option"><input id="ticket-filter" type="checkbox"> Deutschlandticket</label>
       <p id="ticket-help" class="muted">Vorauswahl für Nahverkehr in Deutschland. Für Sondertarife und Grenzstrecken gilt der <a href="https://www.deutschlandticket.de/legal/tariff" target="_blank" rel="noopener">offizielle Geltungsbereich</a>.</p>
       <fieldset>
@@ -98,28 +138,19 @@
       </div>
     </form>
   </dialog>
-  <dialog id="settings" aria-labelledby="settings-title">
-    <div class="settings-title">
-      <h2 id="settings-title">Einstellungen</h2>
+  <dialog id="map-dialog" class="map-dialog" aria-labelledby="map-title">
+    <div class="map-heading">
+      <h2 id="map-title" tabindex="-1" autofocus>Fahrtverlauf</h2>
       <form method="dialog"><button type="submit">Schließen</button></form>
     </div>
-    <h3>Transitous-API</h3>
-    <p id="usage-status" role="status"></p>
-    <div id="usage-report" hidden>
-      <div class="usage-total"><strong id="usage-total"></strong><span>letzte 24 Stunden</span></div>
-      <progress id="usage-limit" aria-label="Verbrauchtes API-Budget"></progress>
-      <p id="usage-today"></p>
-      <p class="muted">Die App begrenzt alle Transitous-Anfragen dieser Installation zusammen auf 720 in 24 Stunden. Transitous nennt 720 für bestimmte Routing-Endpunkte als Schwelle zur Abstimmung.</p>
-      <h3>Aufrufe pro Tag · letzte 14 Tage</h3>
-      <ul class="usage-legend" aria-label="Diagrammlegende">
-        <li class="usage-places">Ortsvorschläge</li>
-        <li class="usage-routes">Verbindungen</li>
-        <li class="usage-updates">Fahrtupdates</li>
-      </ul>
-      <ol id="usage-history" class="usage-history"></ol>
+    <p id="map-status" class="muted" role="status" hidden></p>
+    <div id="map-canvas" class="map-canvas" aria-label="Karte des Fahrtverlaufs" hidden></div>
+    <div id="map-controls" class="map-controls" hidden>
+      <button id="map-overview" type="button">Ganze Route</button>
+      <button id="map-location" type="button" aria-pressed="false">Live-Standort</button>
     </div>
-    <button id="reload-usage" type="button">Statistik aktualisieren</button>
+    <div id="map-walks" class="map-walks"></div>
+    <p id="map-location-status" role="status" hidden></p>
   </dialog>
-  <footer class="wrap">Fahrplandaten von <a href="https://transitous.org/sources/">Transitous</a> · Kartendaten von <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap-Mitwirkenden</a></footer>
 </body>
 </html>

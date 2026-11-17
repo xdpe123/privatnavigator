@@ -59,9 +59,13 @@ export function createTransitClient(contact, beforeRequest = () => {}) {
     };
   }
 
-  function refreshJourney(itineraryId) {
+  function refreshJourney(itineraryId, geometry = false) {
     const upstream = new URL('https://api.transitous.org/api/v6/refresh-itinerary');
-    upstream.search = new URLSearchParams({ itineraryId, detailedLegs: 'false', language: 'de' });
+    upstream.search = new URLSearchParams({ itineraryId, detailedLegs: String(geometry), language: 'de' });
+    if (geometry) {
+      upstream.searchParams.set('detailedTransfers', 'true');
+      upstream.searchParams.set('useRoutedTransfers', 'true');
+    }
     return lookup(upstream, 20_000);
   }
 

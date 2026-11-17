@@ -35,7 +35,7 @@ export async function transitApi(request, url, client, json) {
       return json(400, { error: 'Diese Fahrt-ID kann nicht aktualisiert werden.' });
     }
     try {
-      return json(200, await refreshJourney(itineraryId));
+      return json(200, await refreshJourney(itineraryId, params.get('geometry') === 'true'));
     } catch (error) {
       if ([400, 404, 422].includes(error.upstreamStatus)) {
         return json(404, { error: 'Der Fahrplandienst konnte diese Fahrt nicht mehr zuordnen.' });

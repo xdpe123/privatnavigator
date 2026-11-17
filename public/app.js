@@ -1,4 +1,5 @@
 import { allGroups, modeGroups, ticketGroups } from './search-filters.js';
+import { createRouteMap } from './route-map.js';
 
 const byId = (id) => document.getElementById(id);
 const clock = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
@@ -197,11 +198,28 @@ async function loadUsage() {
   }
 }
 
-byId('open-settings').onclick = () => {
-  byId('settings').showModal();
-  void loadUsage();
-};
 byId('reload-usage').onclick = loadUsage;
+
+const tabs = [...document.querySelectorAll('.bottom-nav a[data-view]')];
+let currentView;
+
+function showView() {
+  const hash = location.hash;
+  const view = hash === '#settings' ? 'settings'
+    : hash === '#saved-trips' || hash.startsWith('#fahrt-') ? 'saved-trips' : 'search-view';
+  if (view === currentView) return;
+  currentView = view;
+  for (const tab of tabs) {
+    const selected = tab.dataset.view === view;
+    byId(tab.dataset.view).hidden = !selected;
+    if (selected) tab.setAttribute('aria-current', 'page');
+    else tab.removeAttribute('aria-current');
+  }
+  window.scrollTo(0, 0);
+  if (view === 'settings') void loadUsage();
+}
+
+const openRouteMap = createRouteMap((id, signal) => getJson('/api/refresh', { id, geometry: 'true' }, signal));
 
 function currentLocation() {
   return new Promise((resolve, reject) => {
@@ -465,9 +483,21 @@ function renderJourney(journey, { from, to, best = false, saved = false } = {}) 
     lines,
   );
   if (hasAlerts) summary.append(element('span', 'Fahrtmeldungen', 'trip-meta problem'));
+  const mapButton = element('button', 'Route auf der Karte', 'map-link');
+  mapButton.type = 'button';
+  mapButton.onclick = () => void openRouteMap(journey);
   const steps = element('ol', null, 'legs');
-  steps.append(...journey.legs.map(renderLeg));
-  details.append(summary, steps);
+  steps.append(...journey.legs.map((leg, index) => {
+    const row = renderLeg(leg);
+    if (leg.mode === 'WALK') {
+      const button = element('button', 'Fußweg auf der Karte', 'map-link');
+      button.type = 'button';
+      button.onclick = () => void openRouteMap(journey, index);
+      row.append(button);
+    }
+    return row;
+  }));
+  details.append(summary, mapButton, steps);
   if (!saved && journey.id) {
     const existing = savedTrips.find((trip) => (trip.originalId || trip.journey.id) === journey.id);
     const save = element('button', existing ? '✓ Fahrt gespeichert' : '☆ Fahrt merken');
@@ -723,6 +753,7 @@ byId('import-file').onchange = async (event) => {
 };
 
 function openTripLink() {
+  showView();
   if (!/^#fahrt-[a-f0-9]{24}$/.test(location.hash)) return;
   const card = byId(location.hash.slice(1));
   if (!card) {

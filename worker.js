@@ -108,14 +108,6 @@ export class TripWatches extends DurableObject {
       if (request.method !== 'POST') return json(405, { error: 'Diese Push-Aktion ist nicht verfügbar.' });
       const subscription = await request.json().catch(() => null);
       if (!subscriptionValid(subscription)) return json(400, { error: 'Für diesen Test ist ein Apple-Push-Abo nötig.' });
-      const attempt = Date.now();
-      const allowed = await storage.transaction(async (tx) => {
-        const last = await tx.get('lastTest');
-        if (last && Date.now() - last < minute) return false;
-        await tx.put('lastTest', attempt);
-        return true;
-      });
-      if (!allowed) return json(429, { error: 'Bitte warte eine Minute bis zum nächsten Test.' });
       try {
         await deliver(this.env, subscription, {
           title: 'Privatnavigator · Push-Test',
@@ -125,11 +117,6 @@ export class TripWatches extends DurableObject {
         return json(200, { ok: true });
       } catch (error) {
         console.warn('Apple-Push-Test fehlgeschlagen:', error.name, error.message);
-        if (error.status !== 429) {
-          await storage.transaction(async (tx) => {
-            if (await tx.get('lastTest') === attempt) await tx.delete('lastTest');
-          });
-        }
         return json(502, {
           error: error.status
             ? `Apple-Push: HTTP ${error.status}${error.reason ? ` · ${error.reason}` : ''}.`
