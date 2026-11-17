@@ -23,6 +23,7 @@ export function snapshot(journey) {
       departure: leg.startTime,
       arrival: leg.endTime,
       scheduledDeparture: leg.scheduledStartTime || leg.from.scheduledDeparture,
+      departureReason: leg.from.departureTimestampReason,
       scheduledArrival: leg.scheduledEndTime || leg.to.scheduledArrival,
       arrivalReason: leg.to.arrivalTimestampReason,
       realTime: Boolean(leg.realTime),
@@ -45,18 +46,37 @@ function departureLabel(leg) {
   return Number.isFinite(timestamp) ? `${clock.format(timestamp)} Uhr` : 'Zeit unbekannt';
 }
 
-function changes(before, after, options) {
+function departureKey(leg) {
+  return JSON.stringify([leg.from, leg.to, leg.scheduledDeparture || '', leg.name]);
+}
+
+function departedLegs(before, after, previous, now) {
+  const departed = new Set(previous || []);
+  for (const current of after) {
+    const old = before.find((leg) => departureKey(leg) === departureKey(current));
+    const departure = Date.parse(current.departure);
+    const oldDeparture = Date.parse(old?.departure);
+    const observed = current.departureReason === 'OBSERVED' || old?.departureReason === 'OBSERVED';
+    if ((observed && (departure <= now || oldDeparture <= now)) || (departure <= now && oldDeparture <= now)) {
+      departed.add(departureKey(current));
+    }
+  }
+  return departed;
+}
+
+function changes(before, after, options, departed) {
   if (before.length !== after.length) return options.route ? 'Der Fahrtverlauf wurde geändert.' : '';
   const messages = [];
   for (const [index, current] of after.entries()) {
     const old = before[index];
+    const departurePassed = departed.has(departureKey(current));
     const prefix = current.name;
     if (options.cancellation && old.cancelled !== current.cancelled) messages.push(`${prefix}: ${current.cancelled ? 'Fahrt oder Halt fällt aus' : 'Ausfall aufgehoben'}.`);
-    if (options.platform && old.track !== current.track && current.track) messages.push(`${prefix} ab ${current.from}: Gleis ${current.track}.`);
+    if (options.platform && !departurePassed && old.track !== current.track && current.track) messages.push(`${prefix} ab ${current.from}: Gleis ${current.track}.`);
     if (options.platform && old.arrivalTrack !== current.arrivalTrack && current.arrivalTrack) messages.push(`${prefix}: Ankunft auf Gleis ${current.arrivalTrack}.`);
     if (options.stops && JSON.stringify(old.skipped) !== JSON.stringify(current.skipped)) messages.push(`${prefix}: Zwischenhalte geändert.`);
-    if (options.time && old.departure !== current.departure) messages.push(`${prefix}: Abfahrt jetzt ${departureLabel(current)}.`);
-    if (options.time && old.arrival !== current.arrival && old.departure === current.departure) messages.push(`${prefix}: Ankunftszeit geändert.`);
+    if (options.time && !departurePassed && old.departure !== current.departure) messages.push(`${prefix}: Abfahrt jetzt ${departureLabel(current)}.`);
+    if (options.time && old.arrival !== current.arrival && (departurePassed || old.departure === current.departure)) messages.push(`${prefix}: Ankunftszeit geändert.`);
     const notice = current.alerts.find((message) => !old.alerts.includes(message));
     if (options.notices && notice) messages.push(`${prefix}: ${notice}`);
   }
@@ -101,7 +121,8 @@ export function evaluateWatch(watch, latest, now) {
   const options = normalizePushOptions(watch.preferences);
   const elapsed = pendingReminders(watch, now);
   const due = elapsed.filter((offset) => options[`before${offset}`]);
-  const change = latest ? changes(watch.baseline, latest, options) : '';
+  const departed = departedLegs(watch.baseline, latest || watch.baseline, watch.departed, now);
+  const change = latest ? changes(watch.baseline, latest, options, departed) : '';
   const content = [change, due.length ? status(latest) : ''].filter(Boolean).join(' ');
   const legs = latest || watch.baseline;
   const route = [legs[0]?.from, legs.at(-1)?.to].filter(Boolean).join(' → ');
@@ -116,6 +137,7 @@ export function evaluateWatch(watch, latest, now) {
       ...watch,
       until: Math.max(watch.until, (Date.parse(latest?.at(-1)?.arrival) || 0) + 30 * minute),
       baseline: latest || watch.baseline,
+      departed: [...departed],
       ...(observation ? { observation } : {}),
       reminders: watch.reminders.filter((offset) => now < watch.departure && !elapsed.includes(offset)),
       nextCheck: nextCheckTime(watch.departure, now),
