@@ -8,7 +8,13 @@
   "preview_urls": false,
   "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
   "durable_objects": {
-    "bindings": [{ "name": "WATCHES", "class_name": "TripWatches" }]
+    "bindings": [
+      { "name": "WATCHES", "class_name": "TripWatches" },
+      { "name": "API_USAGE", "class_name": "ApiUsage" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TripWatches"] }]
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["TripWatches"] },
+    { "tag": "v2", "new_sqlite_classes": ["ApiUsage"] }
+  ]
 }

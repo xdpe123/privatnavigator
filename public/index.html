@@ -11,7 +11,7 @@
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <header><div class="wrap"><a class="brand" href="/">Privatnavigator</a><nav aria-label="Bereiche"><a href="#planner">Suche</a><a href="#saved-trips">Meine Fahrten</a></nav></div></header>
+  <header><div class="wrap"><a class="brand" href="/">Privatnavigator</a><nav aria-label="Bereiche"><a href="#planner">Suche</a><a href="#saved-trips">Meine Fahrten</a><button id="open-settings" type="button">Einstellungen</button></nav></div></header>
   <main class="wrap">
     <h1>Verbindung suchen</h1>
     <form id="planner" class="panel">
@@ -39,8 +39,10 @@
       </div>
       <div class="actions">
         <button class="primary" id="submit">Verbindungen finden</button>
+        <button type="button" id="open-filters" aria-haspopup="dialog">⚙ Suchoptionen</button>
         <button type="button" id="save-route" disabled>☆ Strecke speichern</button>
       </div>
+      <p id="filter-summary" class="muted" hidden></p>
       <p id="form-status" role="status" hidden></p>
     </form>
     <section id="favorites" class="panel" hidden aria-labelledby="favorites-title">
@@ -72,6 +74,44 @@
       </details>
     </section>
   </main>
+  <dialog id="search-filters" aria-labelledby="filter-title">
+    <form id="filter-form">
+      <h2 id="filter-title">Suchoptionen</h2>
+      <label class="option"><input id="ticket-filter" type="checkbox"> Deutschlandticket</label>
+      <p id="ticket-help" class="muted">Vorauswahl für Nahverkehr in Deutschland. Für Sondertarife und Grenzstrecken gilt der <a href="https://www.deutschlandticket.de/legal/tariff" target="_blank" rel="noopener">offizielle Geltungsbereich</a>.</p>
+      <fieldset>
+        <legend>Verkehrsmittel</legend>
+        <div id="mode-options"></div>
+      </fieldset>
+      <p id="filter-status" role="status" hidden></p>
+      <div class="trip-actions">
+        <button class="primary" type="submit">Übernehmen</button>
+        <button id="close-filters" type="button">Abbrechen</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="settings" aria-labelledby="settings-title">
+    <div class="settings-title">
+      <h2 id="settings-title">Einstellungen</h2>
+      <form method="dialog"><button type="submit">Schließen</button></form>
+    </div>
+    <h3>Transitous-API</h3>
+    <p id="usage-status" role="status"></p>
+    <div id="usage-report" hidden>
+      <div class="usage-total"><strong id="usage-total"></strong><span>letzte 24 Stunden</span></div>
+      <progress id="usage-limit" aria-label="Verbrauchtes API-Budget"></progress>
+      <p id="usage-today"></p>
+      <p class="muted">Die App begrenzt alle Transitous-Anfragen dieser Installation zusammen auf 720 in 24 Stunden. Transitous nennt 720 für bestimmte Routing-Endpunkte als Schwelle zur Abstimmung.</p>
+      <h3>Aufrufe pro Tag · letzte 14 Tage</h3>
+      <ul class="usage-legend" aria-label="Diagrammlegende">
+        <li class="usage-places">Ortsvorschläge</li>
+        <li class="usage-routes">Verbindungen</li>
+        <li class="usage-updates">Fahrtupdates</li>
+      </ul>
+      <ol id="usage-history" class="usage-history"></ol>
+    </div>
+    <button id="reload-usage" type="button">Statistik aktualisieren</button>
+  </dialog>
   <footer class="wrap">Fahrplandaten von <a href="https://transitous.org/sources/">Transitous</a> · Kartendaten von <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap-Mitwirkenden</a></footer>
 </body>
 </html>

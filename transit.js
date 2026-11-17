@@ -1,15 +1,17 @@
-export function createTransitClient(contact) {
-  const userAgent = `PrivatNavigator/0.3 (${contact || 'local prototype'})`;
+import { matchesFilters, routingModes } from './public/search-filters.js';
+
+export function createTransitClient(contact, beforeRequest = () => {}) {
+  const userAgent = `PrivatNavigator/0.4 (${contact || 'local prototype'})`;
   const cache = new Map();
 
   function lookup(url, ttl) {
     const key = url.href;
     const cached = cache.get(key);
     if (cached?.until > Date.now()) return cached.result;
-    const result = fetch(url, {
+    const result = Promise.resolve().then(() => beforeRequest(url.pathname)).then(() => fetch(url, {
       headers: { 'User-Agent': userAgent, Accept: 'application/json' },
       signal: AbortSignal.timeout(12000),
-    }).then((response) => {
+    })).then((response) => {
       if (!response.ok) {
         const error = new Error(`Transitous HTTP ${response.status}`);
         error.upstreamStatus = response.status;
@@ -41,14 +43,15 @@ export function createTransitClient(contact) {
       }));
   }
 
-  async function journeys(from, to, time, arriveBy) {
+  async function journeys(from, to, time, arriveBy, groups, ticket) {
     const upstream = new URL('https://api.transitous.org/api/v6/plan');
     upstream.search = new URLSearchParams({
-      fromPlace: from, toPlace: to, time, arriveBy, numItineraries: '5',
+      fromPlace: from, toPlace: to, time, arriveBy, numItineraries: groups ? '12' : '5',
       detailedLegs: 'false', language: 'de',
     });
+    if (groups) upstream.searchParams.set('transitModes', routingModes(groups).join(','));
     const plan = await lookup(upstream, 30_000);
-    return plan.itineraries;
+    return groups ? plan.itineraries.filter((trip) => matchesFilters(trip, groups, ticket)).slice(0, 5) : plan.itineraries;
   }
 
   function refreshJourney(itineraryId) {

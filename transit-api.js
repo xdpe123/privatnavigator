@@ -1,3 +1,5 @@
+import { allGroups, ticketGroups } from './public/search-filters.js';
+
 export async function transitApi(request, url, client, json) {
   const params = url.searchParams;
   const { stations, journeys, refreshJourney } = client;
@@ -16,7 +18,14 @@ export async function transitApi(request, url, client, json) {
         !time || !Number.isFinite(Date.parse(time)) || !['true', 'false'].includes(arriveBy)) {
       return json(400, { error: 'Bitte Start, Ziel und Zeitpunkt prüfen.' });
     }
-    return json(200, await journeys(from, to, time, arriveBy));
+    const ticket = params.get('ticket') === 'true';
+    const requested = params.has('modes') ? params.get('modes').split(',') : null;
+    if (requested?.some((group) => !allGroups.includes(group))) {
+      return json(400, { error: 'Bitte gültige Verkehrsmittel auswählen.' });
+    }
+    const groups = ticket ? ticketGroups.filter((group) => !requested || requested.includes(group)) : requested;
+    if (groups && !groups.length) return json(400, { error: 'Bitte mindestens ein passendes Verkehrsmittel auswählen.' });
+    return json(200, await journeys(from, to, time, arriveBy, groups, ticket));
   }
   if (url.pathname === '/api/refresh') {
     const itineraryId = params.get('id');

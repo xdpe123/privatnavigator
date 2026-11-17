@@ -1,4 +1,4 @@
-# Privatnavigator 0.3
+# Privatnavigator 0.4
 
 Mobiler Verbindungsplaner mit echten Fahrplandaten. Bei der Abfahrtssuche steht die früheste Ankunft oben. Bei der Ankunftssuche steht die späteste passende Abfahrt oben. Bei gleicher Zeit zählen weniger Umstiege und dann die kürzere Reisedauer. Verbindungen zeigen Fahrtabschnitte, Zwischenhalte, Fahrtmeldungen und verfügbare Echtzeitinformationen. Favoriten für Orte und Strecken sowie gespeicherte Einzelverbindungen liegen im jeweiligen Browser. Auf HTTPS kann „Meinen Standort nutzen“ bei Start oder Ziel gewählt werden. Die App fragt den Standort beim Anwählen und bei einer neuen Suche ab.
 
@@ -22,6 +22,10 @@ Am PC [localhost:3000](http://localhost:3000) öffnen. Für einen Test auf einem
 5. Eine Verbindung aufklappen und „Fahrt merken“ wählen. Unter „Meine Fahrten“ prüfen, ob sie nach einem Neuladen weiter erscheint. „Live aktualisieren“ ruft dieselbe Fahrt erneut ab. Bei Abrufproblemen bleibt der letzte gespeicherte Stand sichtbar.
 
 ## Technik und Datenquellen
+
+Unter „Suchoptionen“ lassen sich die Verkehrsmittel einzeln wählen. Die Deutschlandticket-Vorauswahl beschränkt die Suche auf deutsche Nahverkehrsabschnitte, für die die Datenquelle deutsche Haltestellenkennungen und einen Betreiber liefert. Klar erkennbare Fernverkehrsangebote werden ausgeschlossen. Die Routingdaten kennen die Tarifgültigkeit pro Fahrt nicht zuverlässig. Für Sonderverkehre, freigegebene Fernzüge und Grenzstrecken gelten die [Tarifbestimmungen](https://www.deutschlandticket.de/legal/tariff).
+
+Unter „Einstellungen“ zeigt die App Transitous-Zugriffe der jeweiligen Installation für die laufenden 24 Stunden und die letzten 14 Kalendertage (Zeitzone Europe/Berlin). Gezählt werden ausgehende Abrufversuche für Ortsvorschläge, Planung und Fahrtupdates. Die App begrenzt diese zusammen auf 720 in 24 Stunden. Transitous selbst nennt 720 für bestimmte Routing-Endpunkte als Schwelle zur Abstimmung. Die Zählung beginnt mit Version 0.4, der lokale und der Cloud-Server führen jeweils einen eigenen Zähler.
 
 Die App verwendet einen Node-HTTP-Server sowie HTML, CSS und Browser-JavaScript. Die einzige direkte npm-Abhängigkeit ist `web-push`. Der Server bündelt die Abfragen an MOTIS und hält Ortsvorschläge zehn Minuten sowie identische Routenanfragen 30 Sekunden im Arbeitsspeicher. Meldungstexte kommen aus den von Transitous bereitgestellten Daten der Betreiber. Deren Abdeckung kann je nach Verkehrsbetrieb und Verbindung vom DB Navigator abweichen. Die Routing-API kann ausgefallene Fahrten bereits bei der Suche ausfiltern.
 

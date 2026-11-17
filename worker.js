@@ -5,6 +5,7 @@ import { subscriptionValid } from './push-subscription.js';
 import { createTransitClient } from './transit.js';
 import { transitApi } from './transit-api.js';
 import { evaluateWatch, minute, pendingReminders, snapshot, tripSchedule } from './trip-monitor.js';
+import { apiLimit, budgetError, day, dayKey, historyDays, requestKind, usageReport } from './usage.js';
 
 function json(status, body) {
   return Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -21,6 +22,13 @@ function authorized(request, password) {
   return timingSafeEqual(hash(expected), hash(request.headers.get('Authorization') || ''));
 }
 
+function cloudTransit(env) {
+  const usage = env.API_USAGE.getByName('transitous');
+  return createTransitClient(env.TRANSITOUS_CONTACT, async (path) => {
+    if (!await usage.reserve(requestKind(path))) throw budgetError();
+  });
+}
+
 export default {
   async fetch(request, env) {
     if (!env.PUSH_ACCESS_PASSWORD) return json(503, { error: 'Die private Installation wird eingerichtet.' });
@@ -31,6 +39,9 @@ export default {
     }
     const url = new URL(request.url);
     try {
+      if (request.method === 'GET' && url.pathname === '/api/usage') {
+        return json(200, await env.API_USAGE.getByName('transitous').report());
+      }
       if (request.method === 'GET' && url.pathname === '/api/push') {
         const ready = Boolean(configured(env));
         return json(200, {
@@ -48,15 +59,45 @@ export default {
       }
       if (url.pathname.startsWith('/api/')) {
         if (!env.TRANSITOUS_CONTACT) return json(503, { error: 'Der Fahrplandienst für diese HTTPS-Installation wird eingerichtet.' });
-        return await transitApi(request, url, createTransitClient(env.TRANSITOUS_CONTACT), json);
+        return await transitApi(request, url, cloudTransit(env), json);
       }
       return await env.ASSETS.fetch(request);
     } catch (error) {
+      if (error.status === 429) return json(429, { error: error.message });
       console.error(error.message);
       return json(502, { error: 'Dienst gerade nicht erreichbar. Bitte versuche es erneut.' });
     }
   },
 };
+
+export class ApiUsage extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.sql = ctx.storage.sql;
+    this.sql.exec('CREATE TABLE IF NOT EXISTS calls (id INTEGER PRIMARY KEY, timestamp INTEGER, date TEXT, kind TEXT)');
+    this.sql.exec('CREATE INDEX IF NOT EXISTS call_time ON calls(timestamp)');
+  }
+
+  reserve(kind) {
+    const now = Date.now();
+    return this.ctx.storage.transactionSync(() => {
+      if (this.count(now) >= apiLimit) return false;
+      this.sql.exec('DELETE FROM calls WHERE timestamp <= ?', now - (historyDays + 1) * day);
+      this.sql.exec('INSERT INTO calls(timestamp,date,kind) VALUES (?,?,?)', now, dayKey(now), kind);
+      return true;
+    });
+  }
+
+  count(now) {
+    return this.sql.exec('SELECT COUNT(*) AS count FROM calls WHERE timestamp > ?', now - day).one().count;
+  }
+
+  report() {
+    const now = Date.now();
+    const rows = this.sql.exec('SELECT date, kind, COUNT(*) AS count FROM calls GROUP BY date, kind').toArray();
+    return usageReport(rows, this.count(now), now);
+  }
+}
 
 export class TripWatches extends DurableObject {
   async fetch(request) {
@@ -66,10 +107,11 @@ export class TripWatches extends DurableObject {
       if (request.method !== 'POST') return json(405, { error: 'Diese Push-Aktion ist nicht verfügbar.' });
       const subscription = await request.json().catch(() => null);
       if (!subscriptionValid(subscription)) return json(400, { error: 'Für diesen Test ist ein Apple-Push-Abo nötig.' });
+      const attempt = Date.now();
       const allowed = await storage.transaction(async (tx) => {
         const last = await tx.get('lastTest');
         if (last && Date.now() - last < minute) return false;
-        await tx.put('lastTest', Date.now());
+        await tx.put('lastTest', attempt);
         return true;
       });
       if (!allowed) return json(429, { error: 'Bitte warte eine Minute bis zum nächsten Test.' });
@@ -81,8 +123,19 @@ export class TripWatches extends DurableObject {
         });
         return json(200, { ok: true });
       } catch (error) {
-        console.warn('Apple-Push-Test fehlgeschlagen:', error.message);
-        return json(502, { error: 'Apple hat die Testmitteilung nicht angenommen. Bitte versuche es erneut.' });
+        console.warn('Apple-Push-Test fehlgeschlagen:', error.name, error.message);
+        if (error.status !== 429) {
+          await storage.transaction(async (tx) => {
+            if (await tx.get('lastTest') === attempt) await tx.delete('lastTest');
+          });
+        }
+        return json(502, {
+          error: error.status
+            ? `Apple-Push: HTTP ${error.status}${error.reason ? ` · ${error.reason}` : ''}.`
+            : 'Der Server konnte die Testmitteilung nicht vorbereiten oder an Apple übertragen.',
+          resetSubscription: [404, 410].includes(error.status) || error.reason === 'VapidPkHashMismatch',
+          diagnostic: error.status ? null : error.name,
+        });
       }
     }
     if (request.method === 'DELETE') {
@@ -103,7 +156,7 @@ export class TripWatches extends DurableObject {
         !body.itineraryId || body.itineraryId.length > 7000 || !/^[a-f0-9]{24}$/.test(body.tripKey)) {
       return json(400, { error: 'Diese Fahrt oder Push-Anmeldung ist ungültig.' });
     }
-    const { refreshJourney } = createTransitClient(this.env.TRANSITOUS_CONTACT);
+    const { refreshJourney } = cloudTransit(this.env);
     const journey = await refreshJourney(body.itineraryId);
     const schedule = tripSchedule(journey, Date.now());
     if (!schedule) return json(400, { error: 'Für diese Fahrt ist die Überwachung bereits abgelaufen.' });
@@ -127,7 +180,7 @@ export class TripWatches extends DurableObject {
     if (this.env.PUSH_MONITORING !== 'true') return;
     const storage = this.ctx.storage;
     const now = Date.now();
-    const { refreshJourney } = createTransitClient(this.env.TRANSITOUS_CONTACT);
+    const { refreshJourney } = cloudTransit(this.env);
     for (const [id, watch] of await storage.list()) {
       if (watch.until <= now) {
         await storage.delete(id);
@@ -172,17 +225,21 @@ async function scheduleAlarm(storage, watches) {
 }
 
 async function deliver(env, subscription, message) {
-  const request = generateRequestDetails(subscription, JSON.stringify(message), { TTL: 600, vapidDetails: {
+  const request = generateRequestDetails(subscription, JSON.stringify(message), { TTL: 600, urgency: 'high', vapidDetails: {
     subject: env.PUSH_SUBJECT, publicKey: env.PUSH_PUBLIC_KEY, privateKey: env.PUSH_PRIVATE_KEY,
   } });
+  const headers = new Headers(request.headers);
+  headers.delete('Content-Length');
   const response = await fetch(request.endpoint, {
     method: request.method, body: request.body,
-    headers: request.headers, redirect: 'error', signal: AbortSignal.timeout(10_000),
+    headers, redirect: 'manual', signal: AbortSignal.timeout(10_000),
   });
-  await response.body?.cancel();
   if (!response.ok) {
+    const result = await response.json().catch(() => null);
     const error = new Error(`Apple Web Push HTTP ${response.status}`);
     error.status = response.status;
+    error.reason = /^[A-Za-z]{2,60}$/.test(result?.reason || '') ? result.reason : null;
     throw error;
   }
+  await response.body?.cancel();
 }

@@ -1,3 +1,5 @@
+import { allGroups, modeGroups, ticketGroups } from './search-filters.js';
+
 const byId = (id) => document.getElementById(id);
 const clock = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
 const modes = {
@@ -7,6 +9,7 @@ const modes = {
 };
 const storageKey = 'privatnavigator.favorites.v1';
 const tripStorageKey = 'privatnavigator.trips.v1';
+const filterStorageKey = 'privatnavigator.filters.v1';
 const calendar = new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' });
 const places = { from: null, to: null };
 const liveLocation = { id: 'live-location', name: 'Mein Standort', type: 'LOCATION' };
@@ -15,6 +18,7 @@ let savedTrips = [];
 let activeSearch;
 let pushSetup;
 let serviceWorker;
+let filters = { ticket: false, groups: allGroups };
 try {
   const saved = JSON.parse(localStorage.getItem(storageKey));
   if (Array.isArray(saved)) favorites = saved;
@@ -26,6 +30,14 @@ try {
   if (Array.isArray(saved)) savedTrips = saved;
 } catch {
   // Saved journeys are optional when the browser blocks local storage.
+}
+try {
+  const saved = JSON.parse(localStorage.getItem(filterStorageKey));
+  if (saved?.groups?.length && saved.groups.every((group) => allGroups.includes(group))) {
+    filters = { ticket: Boolean(saved.ticket), groups: saved.groups };
+  }
+} catch {
+  // Default modes work without local storage.
 }
 
 function element(tag, value, className) {
@@ -93,6 +105,100 @@ function clearResults() {
   activeSearch?.abort();
   byId('results').hidden = true;
 }
+
+const modeInputs = new Map(allGroups.map((group) => {
+  const label = element('label', null, 'option');
+  const checkbox = element('input');
+  checkbox.type = 'checkbox';
+  label.append(checkbox, document.createTextNode(modeGroups[group].label));
+  byId('mode-options').append(label);
+  return [group, checkbox];
+}));
+const filterDialog = byId('search-filters');
+const ticketInput = byId('ticket-filter');
+ticketInput.onchange = () => {
+  for (const [group, input] of modeInputs) input.disabled = ticketInput.checked && !ticketGroups.includes(group);
+};
+byId('open-filters').onclick = () => {
+  ticketInput.checked = filters.ticket;
+  for (const [group, input] of modeInputs) input.checked = filters.groups.includes(group);
+  ticketInput.onchange();
+  setStatus('filter-status', '');
+  filterDialog.showModal();
+};
+byId('close-filters').onclick = () => filterDialog.close();
+byId('filter-form').onsubmit = (event) => {
+  event.preventDefault();
+  const groups = allGroups.filter((group) => modeInputs.get(group).checked);
+  if (!groups.some((group) => !ticketInput.checked || ticketGroups.includes(group))) {
+    setStatus('filter-status', 'Wähle mindestens ein passendes Verkehrsmittel aus.');
+    return;
+  }
+  filters = { ticket: ticketInput.checked, groups };
+  try {
+    localStorage.setItem(filterStorageKey, JSON.stringify(filters));
+  } catch {
+    // Apply for this session when persistent storage is unavailable.
+  }
+  updateFilterSummary();
+  clearResults();
+  filterDialog.close();
+};
+
+function updateFilterSummary() {
+  const active = filters.ticket ? 'Deutschlandticket · Nahverkehr' : '';
+  const groups = filters.groups.length < allGroups.length ? 'Verkehrsmittel gefiltert' : '';
+  setStatus('filter-summary', [active, groups].filter(Boolean).join(' · '));
+}
+
+updateFilterSummary();
+
+const usageKinds = { places: 'Ortsvorschläge', routes: 'Verbindungen', updates: 'Fahrtupdates' };
+const usageDate = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'UTC' });
+const totalUsage = (entry) => entry.places + entry.routes + entry.updates;
+
+async function loadUsage() {
+  const refresh = byId('reload-usage');
+  refresh.disabled = true;
+  setStatus('usage-status', 'Statistik wird geladen …');
+  try {
+    const { limit, rolling, days } = await getJson('/api/usage', {});
+    byId('usage-total').textContent = `${rolling} / ${limit}`;
+    byId('usage-limit').max = limit;
+    byId('usage-limit').value = rolling;
+    byId('usage-today').textContent = `Heute: ${totalUsage(days.at(-1))} Aufrufe · ${limit - rolling} im laufenden Budget verfügbar`;
+    const max = Math.max(1, ...days.map(totalUsage));
+    byId('usage-history').replaceChildren(...[...days].reverse().map((entry) => {
+      const row = element('li');
+      const date = element('time', usageDate.format(Date.parse(entry.date)));
+      date.dateTime = entry.date;
+      const bar = element('span', null, 'usage-bar');
+      bar.setAttribute('role', 'img');
+      const label = Object.entries(usageKinds).map(([kind, name]) => `${name}: ${entry[kind]}`).join(', ');
+      bar.setAttribute('aria-label', label);
+      row.title = label;
+      for (const kind of Object.keys(usageKinds)) {
+        const segment = element('span', null, `usage-${kind}`);
+        segment.style.width = `${entry[kind] / max * 100}%`;
+        bar.append(segment);
+      }
+      row.append(date, bar, element('strong', totalUsage(entry)));
+      return row;
+    }));
+    byId('usage-report').hidden = false;
+    setStatus('usage-status', '');
+  } catch (error) {
+    setStatus('usage-status', `Statistik konnte nicht geladen werden. ${error.message}`);
+  } finally {
+    refresh.disabled = false;
+  }
+}
+
+byId('open-settings').onclick = () => {
+  byId('settings').showModal();
+  void loadUsage();
+};
+byId('reload-usage').onclick = loadUsage;
 
 function currentLocation() {
   return new Promise((resolve, reject) => {
@@ -413,7 +519,13 @@ byId('send-push-test').onclick = async () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(subscription.toJSON()),
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error);
+    if (!response.ok) {
+      if (result.resetSubscription) {
+        await subscription.unsubscribe();
+        throw new Error(`${result.error} Das alte Abo wurde zurückgesetzt. Tippe erneut auf „Testmitteilung senden“.`);
+      }
+      throw new Error(result.diagnostic ? `${result.error} (${result.diagnostic})` : result.error);
+    }
     setStatus('push-test-status', 'Apple hat die Testmitteilung angenommen. Prüfe deine Mitteilungszentrale.');
   } catch (error) {
     setStatus('push-test-status', error.name === 'NotAllowedError'
@@ -614,6 +726,8 @@ byId('planner').addEventListener('submit', async (event) => {
       to: to.id,
       time: new Date(byId('time').value).toISOString(),
       arriveBy,
+      ...(filters.ticket ? { ticket: 'true' } : {}),
+      ...(filters.groups.length < allGroups.length ? { modes: filters.groups.join(',') } : {}),
     }, controller.signal);
     if (controller.signal.aborted) return;
     journeys.sort((a, b) => (arriveBy ? Date.parse(b.startTime) - Date.parse(a.startTime)

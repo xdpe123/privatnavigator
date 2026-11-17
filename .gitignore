@@ -6,4 +6,6 @@
 node_modules/
 push-watches.json
 push-watches.tmp
+api-usage.json
+api-usage.tmp
 privatnavigator-daten*.json

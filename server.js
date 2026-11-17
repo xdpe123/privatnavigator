@@ -4,16 +4,18 @@ import { networkInterfaces } from 'node:os';
 import { createTransitClient } from './transit.js';
 import { transitApi } from './transit-api.js';
 import { authorizePushSite, handlePush, monitorTrips } from './push.js';
+import { record, report } from './local-usage.js';
 
 const port = Number(process.env.PORT || 3000);
 const lan = process.argv.includes('--lan');
 const contact = process.env.TRANSITOUS_CONTACT?.trim();
-const transit = createTransitClient(contact);
+const transit = createTransitClient(contact, record);
 const { refreshJourney } = transit;
 const files = new Map([
   ['/', ['index.html', 'text/html']],
   ['/app.js', ['app.js', 'text/javascript']],
   ['/style.css', ['style.css', 'text/css']],
+  ['/search-filters.js', ['search-filters.js', 'text/javascript']],
   ['/manifest.webmanifest', ['manifest.webmanifest', 'application/manifest+json']],
   ['/sw.js', ['sw.js', 'text/javascript']],
   ['/icon-192.png', ['icon-192.png', 'image/png']],
@@ -29,6 +31,7 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url, 'http://localhost');
   try {
     if (!authorizePushSite(request, response)) return;
+    if (request.method === 'GET' && url.pathname === '/api/usage') return json(response, 200, report());
     if (url.pathname.startsWith('/api/push')) return await handlePush(request, response, url, json, refreshJourney);
     if (request.method !== 'GET') return json(response, 405, { error: 'Nur GET ist verfügbar.' });
     if (url.pathname.startsWith('/api/')) return await transitApi(request, url, transit, (status, body) => json(response, status, body));
@@ -38,6 +41,7 @@ const server = createServer(async (request, response) => {
     response.writeHead(200, { 'Content-Type': file[1], 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache' });
     response.end(content);
   } catch (error) {
+    if (error.status === 429) return json(response, 429, { error: error.message });
     console.error(error.message, error.cause?.code || '');
     json(response, 502, { error: 'Fahrplandienst gerade nicht erreichbar. Bitte versuche es in Kürze erneut.' });
   }
