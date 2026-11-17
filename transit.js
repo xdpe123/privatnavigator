@@ -43,7 +43,7 @@ export function createTransitClient(contact, beforeRequest = () => {}) {
       }));
   }
 
-  async function journeys(from, to, time, arriveBy, groups, ticket, cursor) {
+  async function journeys(from, to, time, arriveBy, groups, ticket, cursor, includeCancelled = false) {
     const upstream = new URL('https://api.transitous.org/api/v6/plan');
     upstream.search = new URLSearchParams({
       fromPlace: from, toPlace: to, time, arriveBy, numItineraries: groups ? '12' : '5',
@@ -51,12 +51,37 @@ export function createTransitClient(contact, beforeRequest = () => {}) {
     });
     if (groups) upstream.searchParams.set('transitModes', routingModes(groups).join(','));
     if (cursor) upstream.searchParams.set('pageCursor', cursor);
-    const plan = await lookup(upstream, 30_000);
+    const realtime = lookup(upstream, 30_000);
+    let scheduled = null;
+    if (includeCancelled) {
+      const plannedUrl = new URL(upstream);
+      plannedUrl.searchParams.set('realtimeMode', 'REALTIME_ANNOTATION_ONLY');
+      plannedUrl.searchParams.set('withScheduledSkippedStops', 'true');
+      scheduled = lookup(plannedUrl, 30_000).catch(() => null);
+    }
+    const [plan, planned] = await Promise.all([realtime, scheduled]);
+    const known = new Set(plan.itineraries.map((trip) => trip.id));
+    const cancellations = (planned?.itineraries || []).filter((trip) => !known.has(trip.id)
+      && trip.legs.some((leg) => leg.cancelled || leg.from?.cancelled || leg.to?.cancelled));
+    const itineraries = [...plan.itineraries, ...cancellations];
     return {
-      itineraries: groups ? plan.itineraries.filter((trip) => matchesFilters(trip, groups, ticket)) : plan.itineraries,
-      earlier: plan.previousPageCursor || null,
-      later: plan.nextPageCursor || null,
+      itineraries: groups ? itineraries.filter((trip) => matchesFilters(trip, groups, ticket)) : itineraries,
+      earlier: plan.previousPageCursor || planned?.previousPageCursor || null,
+      later: plan.nextPageCursor || planned?.nextPageCursor || null,
+      cancellationsUnavailable: includeCancelled && !planned,
     };
+  }
+
+  async function board(stopId, time, mode, cursor) {
+    const upstream = new URL('https://api.transitous.org/api/v6/stoptimes');
+    upstream.search = new URLSearchParams({
+      stopId, time, n: '30', direction: 'LATER', language: 'de',
+      arriveBy: String(mode === 'arrivals'), both: String(mode === 'both'),
+      realtimeMode: 'REALTIME_ANNOTATION_ONLY',
+    });
+    if (cursor) upstream.searchParams.set('pageCursor', cursor);
+    const result = await lookup(upstream, 25_000);
+    return { events: result.stopTimes, earlier: result.previousPageCursor || null, later: result.nextPageCursor || null };
   }
 
   function refreshJourney(itineraryId, geometry = false) {
@@ -69,5 +94,5 @@ export function createTransitClient(contact, beforeRequest = () => {}) {
     return lookup(upstream, 20_000);
   }
 
-  return { stations, journeys, refreshJourney };
+  return { stations, journeys, refreshJourney, board };
 }

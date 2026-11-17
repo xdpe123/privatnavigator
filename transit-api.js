@@ -2,7 +2,7 @@ import { allGroups, ticketGroups } from './public/search-filters.js';
 
 export async function transitApi(request, url, client, json) {
   const params = url.searchParams;
-  const { stations, journeys, refreshJourney } = client;
+  const { stations, journeys, refreshJourney, board } = client;
   if (request.method !== 'GET') return json(405, { error: 'Nur GET ist verfügbar.' });
   if (url.pathname === '/api/stations') {
     const query = params.get('q')?.trim();
@@ -26,8 +26,19 @@ export async function transitApi(request, url, client, json) {
     }
     const groups = ticket ? ticketGroups.filter((group) => !requested || requested.includes(group)) : requested;
     if (groups && !groups.length) return json(400, { error: 'Bitte mindestens ein passendes Verkehrsmittel auswählen.' });
-    const page = await journeys(from, to, time, arriveBy, groups, ticket, cursor);
+    const page = await journeys(from, to, time, arriveBy, groups, ticket, cursor, params.get('cancellations') === 'true');
     return json(200, params.get('paged') === 'true' ? page : page.itineraries.slice(0, 5));
+  }
+  if (url.pathname === '/api/board') {
+    const stop = params.get('stop');
+    const time = params.get('time');
+    const mode = params.get('mode');
+    const cursor = params.get('cursor');
+    if (!stop || stop.length > 250 || !time || !Number.isFinite(Date.parse(time)) ||
+        !['departures', 'arrivals', 'both'].includes(mode) || cursor?.length > 1000) {
+      return json(400, { error: 'Bitte Bahnhof und Zeitpunkt prüfen.' });
+    }
+    return json(200, await board(stop, time, mode, cursor));
   }
   if (url.pathname === '/api/refresh') {
     const itineraryId = params.get('id');
