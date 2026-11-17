@@ -1,7 +1,9 @@
+self.addEventListener('install', (event) => event.waitUntil(self.skipWaiting()));
+
 self.addEventListener('push', (event) => {
   const { title, body, url } = event.data.json();
   event.waitUntil(self.registration.showNotification(title, {
-    body, icon: '/icon-192.png', tag: url, data: { url },
+    body, icon: '/navigator-192.png', tag: url, data: { url },
   }));
 });
 

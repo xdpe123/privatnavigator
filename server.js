@@ -20,6 +20,9 @@ const files = new Map([
   ['/sw.js', ['sw.js', 'text/javascript']],
   ['/icon-192.png', ['icon-192.png', 'image/png']],
   ['/icon-512.png', ['icon-512.png', 'image/png']],
+  ['/navigator-180.png', ['navigator-180.png', 'image/png']],
+  ['/navigator-192.png', ['navigator-192.png', 'image/png']],
+  ['/navigator-512.png', ['navigator-512.png', 'image/png']],
 ]);
 
 function json(response, status, body) {

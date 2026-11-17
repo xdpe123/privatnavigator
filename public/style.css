@@ -19,7 +19,8 @@ header a { display: inline-block; padding: .9rem 0; text-decoration: none; }
 header nav { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem 1rem; font-size: .9rem; }
 header nav a { color: var(--ink); }
 header nav button { font-size: .9rem; }
-.brand { font-size: 1.1rem; font-weight: 800; }
+.brand { display: inline-flex; align-items: center; gap: .55rem; font-size: 1.1rem; font-weight: 800; }
+.brand img { border-radius: .45rem; }
 main { padding-top: clamp(1.2rem, 4vw, 3rem); }
 h1 { margin: 0 0 1.1rem; font-size: clamp(1.75rem, 5vw, 3rem); letter-spacing: -.035em; }
 h2 { margin: 0 0 .7rem; font-size: 1.22rem; }
