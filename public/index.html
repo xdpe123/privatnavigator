@@ -114,6 +114,11 @@
       <p id="saved-empty" class="muted">Gespeicherte Einzelverbindungen findest du hier.</p>
       <p id="saved-status" role="status" hidden></p>
       <div id="saved-items"></div>
+      <details class="trip-archive panel">
+        <summary id="archive-count">Alte Verbindungen</summary>
+        <p id="archive-empty" class="muted">Hier erscheinen Fahrten 30 Minuten nach der zuletzt bekannten Ankunft. Bestätigte Ankünfte und Verspätungen werden berücksichtigt.</p>
+        <div id="archived-items"></div>
+      </details>
       <div id="push-test" hidden>
         <button id="send-push-test" type="button">Testmitteilung senden</button>
         <p id="push-test-status" role="status"></p>
@@ -182,6 +187,7 @@
     </section>
     <section class="panel" aria-labelledby="punctuality-title">
       <h2 id="punctuality-title">Pünktlichkeit meiner Strecken</h2>
+      <button id="open-punctuality" type="button">Streckenanalyse öffnen</button>
       <p class="muted">Die letzten 90 Tage aus abgeschlossenen Fahrten mit aktiver Push-Überwachung. Die Quote zählt gemessene Ankünfte am letzten Haltepunkt mit weniger als 6 Minuten Verspätung.</p>
       <p id="punctuality-status" role="status"></p>
       <div id="punctuality-routes"></div>
@@ -278,6 +284,16 @@
       <p id="rename-status" role="status" hidden></p>
       <div class="trip-actions"><button class="primary" type="submit">Speichern</button><button id="cancel-rename" type="button">Abbrechen</button></div>
     </form>
+  </dialog>
+<dialog id="punctuality-dialog" class="analysis-dialog" aria-labelledby="analysis-title">
+    <div class="result-top"><h1 id="analysis-title">Meine Streckenanalyse</h1><button id="close-punctuality" aria-label="Streckenanalyse schließen">×</button></div>
+    <div class="analysis-filters">
+      <label>Zeitraum<select id="analysis-period"><option value="7">7 Tage</option><option value="30">30 Tage</option><option value="90" selected>90 Tage</option></select></label>
+      <label>Strecke<select id="analysis-route"></select></label>
+    </div>
+    <p id="analysis-status" role="status"></p>
+    <div id="analysis-content"></div>
+    <p class="muted">Grundlage sind deine überwachten Fahrten. Pünktlich bedeutet weniger als 6 Minuten Ankunftsverspätung. Prognosen zählen separat. Die Ausfallquote bezieht sich auf alle erfassten Fahrten. Kleine Stichproben erlauben keine verlässliche Vorhersage.</p>
   </dialog>
 </body>
 </html>

@@ -19,6 +19,7 @@ const files = new Map([
   ['/route-map.js', ['route-map.js', 'text/javascript']],
   ['/journey-details.js', ['journey-details.js', 'text/javascript']],
   ['/push-options.js', ['push-options.js', 'text/javascript']],
+  ['/punctuality-view.js', ['punctuality-view.js', 'text/javascript']],
   ['/recurring-trips.js', ['recurring-trips.js', 'text/javascript']],
   ['/leaflet/leaflet.js', ['leaflet/leaflet.js', 'text/javascript']],
   ['/leaflet/leaflet.css', ['leaflet/leaflet.css', 'text/css']],

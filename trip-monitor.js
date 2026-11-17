@@ -3,6 +3,10 @@ import { normalizePushOptions } from './public/push-options.js';
 
 export const minute = 60_000;
 export const checkInterval = 5 * minute;
+export function nextCheckTime(departure, now) {
+  return departure - now > 12 * 60 * minute
+    ? Math.min(now + 60 * minute, departure - 12 * 60 * minute) : now + checkInterval;
+}
 const reminderOffsets = [60, 30];
 const clock = new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit' });
 
@@ -83,7 +87,7 @@ export function tripSchedule(journey, now) {
   return {
     departure,
     until: Math.max(arrival, Date.parse(journey.endTime) || 0) + 30 * minute,
-    nextCheck: now + checkInterval,
+    nextCheck: nextCheckTime(departure, now),
     reminders: reminderOffsets.filter((offset) => departure - offset * minute >= now),
   };
 }
@@ -114,7 +118,7 @@ export function evaluateWatch(watch, latest, now) {
       baseline: latest || watch.baseline,
       ...(observation ? { observation } : {}),
       reminders: watch.reminders.filter((offset) => now < watch.departure && !elapsed.includes(offset)),
-      nextCheck: now + checkInterval,
+      nextCheck: nextCheckTime(watch.departure, now),
     },
   };
 }

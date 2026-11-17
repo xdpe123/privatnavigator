@@ -40,7 +40,7 @@ export default {
         return json(200, await env.API_USAGE.getByName('transitous').report());
       }
       if (request.method === 'GET' && url.pathname === '/api/punctuality') {
-        return json(200, { routes: await env.TRIP_HISTORY.getByName('punctuality').report() });
+        return json(200, { routes: await env.TRIP_HISTORY.getByName('punctuality').report([7, 30, 90].includes(Number(url.searchParams.get('days'))) ? Number(url.searchParams.get('days')) : 90) });
       }
       if (request.method === 'GET' && url.pathname === '/api/push') {
         const ready = Boolean(configured(env));
@@ -180,9 +180,9 @@ export class TripHistory extends DurableObject {
     trip.id, trip.origin, trip.destination, trip.lines, trip.departure, trip.kind, trip.delay);
   }
 
-  report() {
+  report(days = 90) {
     return summarizeTrips(this.sql.exec('SELECT origin, destination, lines, departure, kind, delay FROM trips WHERE departure >= ? ORDER BY departure DESC',
-      Date.now() - historyWindow).toArray());
+      Date.now() - historyWindow).toArray(), days);
   }
 }
 
