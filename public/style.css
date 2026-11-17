@@ -184,6 +184,8 @@ button:disabled { opacity: .55; cursor: default; }
 .recurring-trip { flex: 0 0 min(87%, 20rem); scroll-snap-align: start; margin-bottom: 0; color: var(--ink); text-decoration: none; }
 .recurring-trip > span, .saved-overview > span, .managed-favorite small { display: block; margin-top: .3rem; font-size: .85rem; }
 .saved-overview { display: block; color: var(--ink); text-decoration: none; margin-bottom: .6rem; }
+.next-trip { border-inline-start: 3px solid var(--action); }
+.next-trip > strong { display: block; margin-top: .3rem; }
 .saved-overview:hover, .recurring-trip:hover { border-color: var(--accent); }
 .journey-menu { position: relative; }
 .journey-menu > summary { list-style: none; cursor: pointer; }

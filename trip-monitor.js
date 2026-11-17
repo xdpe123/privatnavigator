@@ -12,6 +12,7 @@ export function snapshot(journey) {
     return {
       name: leg.displayName || leg.routeShortName || 'Fahrt',
       from: leg.from.name,
+      to: leg.to.name,
       departure: leg.startTime,
       arrival: leg.endTime,
       scheduledDeparture: leg.scheduledStartTime || leg.from.scheduledDeparture,
@@ -91,7 +92,10 @@ export function pendingReminders(watch, now) {
 export function evaluateWatch(watch, latest, now) {
   const due = pendingReminders(watch, now);
   const change = latest ? changes(watch.baseline, latest) : '';
-  const body = [change, due.length ? status(latest) : ''].filter(Boolean).join(' ').slice(0, 300);
+  const content = [change, due.length ? status(latest) : ''].filter(Boolean).join(' ');
+  const legs = latest || watch.baseline;
+  const route = [legs[0]?.from, legs.at(-1)?.to].filter(Boolean).join(' → ');
+  const body = content && [route, content].filter(Boolean).join('\n').slice(0, 300);
   return {
     message: body ? { title: due.length ? `Fahrtstatus · ${due.at(-1)} Min. vorher` : 'Änderung zu deiner Fahrt', body } : null,
     next: {

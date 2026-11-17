@@ -915,21 +915,24 @@ byId('send-push-test').onclick = async () => {
   }
 };
 
-function nativeSnapshot(trip) {
-  const leg = trip.journey.legs.find((item) => item.mode !== 'WALK') || trip.journey.legs[0];
-  return {
-    id: trip.key, origin: trip.from.name, destination: trip.to.name,
-    departure: Date.parse(trip.journey.startTime) / 1000, arrival: Date.parse(trip.journey.endTime) / 1000,
-    line: leg ? lineName(leg) : '', platform: leg?.from.track || leg?.from.scheduledTrack || '',
-    status: isCancelled(trip.journey) ? 'Fällt aus' : `Stand ${timeLabel(trip.updated)}`,
-  };
-}
-
-function syncNativeTrips() {
-  window.webkit?.messageHandlers?.navigatorTrips?.postMessage({
-    action: 'sync', trips: savedTrips.filter((trip) => Date.parse(trip.journey.endTime) > Date.now())
-      .sort((a, b) => Date.parse(a.journey.startTime) - Date.parse(b.journey.startTime)).slice(0, 8).map(nativeSnapshot),
-  });
+function renderNextTrip() {
+  const now = Date.now();
+  const card = byId('next-trip');
+  const trip = savedTrips.filter(({ journey }) => Date.parse(journey.endTime) > now)
+    .sort((a, b) => Date.parse(a.journey.startTime) - Date.parse(b.journey.startTime))[0];
+  card.hidden = !trip;
+  if (!trip) return;
+  const { journey, from, to } = trip;
+  const train = journey.legs.find((leg) => leg.mode !== 'WALK' && Date.parse(leg.endTime) > now);
+  const platform = train?.from.track || train?.from.scheduledTrack;
+  card.href = `#fahrt-${trip.key}`;
+  const timing = `${calendar.format(new Date(journey.startTime))} · ${timeLabel(journey.startTime)}–${timeLabel(journey.endTime)}`;
+  card.replaceChildren(
+    element('span', Date.parse(journey.startTime) > now ? 'Nächste gemerkte Fahrt' : 'Aktuelle gemerkte Fahrt', 'muted'),
+    element('strong', `${from.name} → ${to.name}`),
+    element('span', [timing, train && lineName(train), platform && `Gleis ${platform}`].filter(Boolean).join(' · '), 'muted'),
+    element('span', isCancelled(journey) ? 'Verbindung fällt aus' : `Datenstand ${timeLabel(trip.updated)}`, isCancelled(journey) ? 'problem' : 'muted'),
+  );
 }
 
 function renderSavedTrips() {
@@ -943,7 +946,7 @@ function renderSavedTrips() {
       element('span', calendar.format(new Date(trip.journey.startTime)) + ' · ' + timeLabel(trip.journey.startTime), 'muted'));
     return link;
   }));
-  syncNativeTrips();
+  renderNextTrip();
 }
 
 function renderSavedTrip(trip) {
@@ -1036,18 +1039,19 @@ function renderSavedTrip(trip) {
     setTimeout(() => URL.revokeObjectURL(file), 1000);
   };
   actions.append(calendarLink);
-  if (window.webkit?.messageHandlers?.navigatorTrips && Date.parse(trip.journey.endTime) > Date.now()) {
-    const activity = element('button', 'Live-Aktivität planen', 'calendar-link');
-    activity.type = 'button';
-    activity.onclick = () => window.webkit.messageHandlers.navigatorTrips.postMessage({ action: 'activity', trip: nativeSnapshot(trip) });
-    actions.append(activity);
-  }
   card.append(heading, stamp, details, actions, status);
   return card;
 }
 
 renderSavedTrips();
 void setupPush().catch(() => {});
+function acknowledgeBadge() {
+  if (document.visibilityState !== 'visible') return;
+  renderNextTrip();
+  if ('clearAppBadge' in navigator) void navigator.clearAppBadge().catch(() => {});
+}
+document.addEventListener('visibilitychange', acknowledgeBadge);
+acknowledgeBadge();
 
 byId('export-data').onclick = () => {
   const trips = savedTrips.map(({ watchId, ...trip }) => trip);

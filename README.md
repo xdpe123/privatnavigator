@@ -41,6 +41,8 @@ Transitous erlaubt ressourcenschonende Prototypentests vor der Quellcodeveröffe
 
 ## iPhone-Push bereitstellen
 
+Die iPhone-Version bleibt eine Home-Screen-Web-App. Bei einer Fahrtmitteilung setzt der Service Worker ein Kennzeichen am App-Symbol, falls iOS-Mitteilungen und Kennzeichen erlaubt sind. Beim Öffnen der App wird das Kennzeichen gelöscht. Auf der Suchseite führt die Karte „Nächste gemerkte Fahrt“ zum zuletzt gespeicherten Fahrtstand.
+
 Die WLAN-Version bietet manuelle Live-Aktualisierung. Für Push braucht das iPhone eine erreichbare HTTPS-Adresse und iOS 16.4 oder neuer. Die Cloudflare-Bereitstellung prüft Fahrten auch bei ausgeschaltetem PC. Der Versand verwendet Apple Web Push. [Apple WebKit](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)
 
 ### Cloudflare Workers

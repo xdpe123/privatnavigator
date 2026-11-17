@@ -48,9 +48,14 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('push', (event) => {
   const { title, body, url } = event.data.json();
-  event.waitUntil(self.registration.showNotification(title, {
-    body, icon: '/navigator-192.png', tag: url, data: { url },
-  }));
+  event.waitUntil((async () => {
+    await self.registration.showNotification(title, {
+      body, icon: '/navigator-192.png', tag: url, data: { url },
+    });
+    if ('setAppBadge' in navigator) {
+      try { await navigator.setAppBadge(1); } catch {}
+    }
+  })());
 });
 
 self.addEventListener('notificationclick', (event) => {
