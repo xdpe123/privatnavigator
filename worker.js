@@ -32,11 +32,18 @@ export default {
     const url = new URL(request.url);
     try {
       if (request.method === 'GET' && url.pathname === '/api/push') {
-        return json(200, { enabled: Boolean(configured(env)), publicKey: configured(env) ? env.PUSH_PUBLIC_KEY : null });
+        const ready = Boolean(configured(env));
+        return json(200, {
+          enabled: ready && env.PUSH_MONITORING === 'true',
+          testEnabled: ready,
+          publicKey: ready ? env.PUSH_PUBLIC_KEY : null,
+        });
       }
-      if (url.pathname === '/api/push/watch') {
+      if (url.pathname === '/api/push/watch' || url.pathname === '/api/push/test') {
         if (!configured(env)) return json(503, { error: 'Push wird eingerichtet.' });
         if (request.headers.get('Origin') !== url.origin) return json(403, { error: 'Ungültige Herkunft.' });
+        if (url.pathname === '/api/push/test') return await env.WATCHES.getByName('push-test').fetch(request);
+        if (env.PUSH_MONITORING !== 'true') return json(503, { error: 'Die automatische Fahrtüberwachung ist noch nicht aktiv.' });
         return await env.WATCHES.getByName('privatnavigator').fetch(request);
       }
       if (url.pathname.startsWith('/api/')) {
@@ -54,6 +61,30 @@ export default {
 export class TripWatches extends DurableObject {
   async fetch(request) {
     const storage = this.ctx.storage;
+    const path = new URL(request.url).pathname;
+    if (path === '/api/push/test') {
+      if (request.method !== 'POST') return json(405, { error: 'Diese Push-Aktion ist nicht verfügbar.' });
+      const subscription = await request.json().catch(() => null);
+      if (!subscriptionValid(subscription)) return json(400, { error: 'Für diesen Test ist ein Apple-Push-Abo nötig.' });
+      const allowed = await storage.transaction(async (tx) => {
+        const last = await tx.get('lastTest');
+        if (last && Date.now() - last < minute) return false;
+        await tx.put('lastTest', Date.now());
+        return true;
+      });
+      if (!allowed) return json(429, { error: 'Bitte warte eine Minute bis zum nächsten Test.' });
+      try {
+        await deliver(this.env, subscription, {
+          title: 'Privatnavigator · Push-Test',
+          body: 'Apple-Push funktioniert. Tippe hier, um den Privatnavigator zu öffnen.',
+          url: '/',
+        });
+        return json(200, { ok: true });
+      } catch (error) {
+        console.warn('Apple-Push-Test fehlgeschlagen:', error.message);
+        return json(502, { error: 'Apple hat die Testmitteilung nicht angenommen. Bitte versuche es erneut.' });
+      }
+    }
     if (request.method === 'DELETE') {
       const id = new URL(request.url).searchParams.get('id');
       if (id) await storage.delete(id);
@@ -93,6 +124,7 @@ export class TripWatches extends DurableObject {
   }
 
   async alarm() {
+    if (this.env.PUSH_MONITORING !== 'true') return;
     const storage = this.ctx.storage;
     const now = Date.now();
     const { refreshJourney } = createTransitClient(this.env.TRANSITOUS_CONTACT);
@@ -112,7 +144,7 @@ export class TripWatches extends DurableObject {
       const { message, next } = evaluateWatch(watch, latest, now);
       delete next.retryAt;
       try {
-        if (message) await deliver(this.env, watch, message);
+        if (message) await deliver(this.env, watch.subscription, { ...message, url: `/#fahrt-${watch.tripKey}` });
       } catch (error) {
         if ([404, 410].includes(error.status)) {
           await storage.delete(id);
@@ -139,10 +171,8 @@ async function scheduleAlarm(storage, watches) {
   await storage.setAlarm(Math.max(Date.now() + 1000, next));
 }
 
-async function deliver(env, watch, message) {
-  const request = generateRequestDetails(watch.subscription, JSON.stringify({
-    ...message, url: `/#fahrt-${watch.tripKey}`,
-  }), { TTL: 600, vapidDetails: {
+async function deliver(env, subscription, message) {
+  const request = generateRequestDetails(subscription, JSON.stringify(message), { TTL: 600, vapidDetails: {
     subject: env.PUSH_SUBJECT, publicKey: env.PUSH_PUBLIC_KEY, privateKey: env.PUSH_PRIVATE_KEY,
   } });
   const response = await fetch(request.endpoint, {

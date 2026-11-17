@@ -333,7 +333,7 @@ function renderJourney(journey, { from, to, best = false, saved = false } = {}) 
       if (current || writeTrips([...savedTrips, trip])) {
         save.textContent = '✓ Fahrt gespeichert';
         save.disabled = true;
-        if (!current && serviceWorker && Date.parse(journey.endTime) > Date.now()) {
+        if (!current && serviceWorker && pushSetup.enabled && Date.parse(journey.endTime) > Date.now()) {
           try {
             await startTripPush(trip);
           } catch (error) {
@@ -389,12 +389,39 @@ async function startTripPush(trip) {
 async function setupPush() {
   const response = await fetch('/api/push');
   pushSetup = await response.json();
-  if (window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && pushSetup.enabled) {
+  if (window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window &&
+      (pushSetup.enabled || pushSetup.testEnabled)) {
     await navigator.serviceWorker.register('/sw.js');
     serviceWorker = await navigator.serviceWorker.ready;
   }
+  if (pushSetup.testEnabled) {
+    byId('push-test').hidden = false;
+    byId('send-push-test').disabled = !serviceWorker;
+    if (!serviceWorker) setStatus('push-test-status', 'Auf dem iPhone in Safari zum Home-Bildschirm hinzufügen und über das App-Symbol öffnen.');
+  }
   renderSavedTrips();
 }
+
+byId('send-push-test').onclick = async () => {
+  const button = byId('send-push-test');
+  button.disabled = true;
+  try {
+    const subscription = await serviceWorker.pushManager.subscribe({
+      userVisibleOnly: true, applicationServerKey: pushSetup.publicKey,
+    });
+    const response = await fetch('/api/push/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(subscription.toJSON()),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error);
+    setStatus('push-test-status', 'Apple hat die Testmitteilung angenommen. Prüfe deine Mitteilungszentrale.');
+  } catch (error) {
+    setStatus('push-test-status', error.name === 'NotAllowedError'
+      ? 'Erlaube Mitteilungen in den iPhone-Einstellungen für diese Web-App.' : error.message);
+  } finally {
+    button.disabled = false;
+  }
+};
 
 function renderSavedTrips() {
   byId('saved-empty').hidden = Boolean(savedTrips.length);
@@ -452,7 +479,7 @@ function renderSavedTrips() {
       }
     };
     actions.append(refresh);
-    if (serviceWorker || trip.watchId) {
+    if ((serviceWorker && pushSetup.enabled) || trip.watchId) {
       const push = element('button', trip.watchId ? 'Push deaktivieren' : 'Push aktivieren');
       push.type = 'button';
       push.disabled = !trip.watchId && Date.parse(trip.journey.endTime) <= Date.now();

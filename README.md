@@ -45,7 +45,8 @@ Die WLAN-Version bietet manuelle Live-Aktualisierung. Für Push braucht das iPho
 2. Eine ignorierte Datei `.env.cloud.json` mit den Schlüsseln `PUSH_ACCESS_PASSWORD`, `PUSH_SUBJECT`, `PUSH_PUBLIC_KEY`, `PUSH_PRIVATE_KEY` und `TRANSITOUS_CONTACT` anlegen. VAPID-Schlüsselpaar wie unten beschrieben erzeugen. Als Kontakt ist die öffentliche Projektseite mit erreichbarem Kontakt geeignet. Den Code veröffentlichen und automatisierte Abrufe mit Transitous abstimmen.
 3. Mit `npx wrangler deploy --secrets-file .env.cloud.json` bereitstellen. Zugangsdaten und Laufzeitdaten gehören in die lokale Geheimnisdatei bzw. den privaten Cloud-Speicher.
 4. Auf dem iPhone die ausgegebene HTTPS-Adresse in Safari öffnen. Mit Benutzernamen `navigator` und dem Projektpasswort anmelden, „Zum Home-Bildschirm“ wählen und die App dort öffnen.
-5. Eine Fahrt merken und beim ersten Mal den Mitteilungen zustimmen. Bei später gespeicherten Fahrten startet die Überwachung automatisch. Bei älteren gespeicherten Fahrten lässt sie sich über „Push aktivieren“ einschalten.
+5. Unter „Meine Fahrten“ **Testmitteilung senden** wählen und den Mitteilungen zustimmen. Der Test sendet eine Push-Mitteilung von Apple und ruft keine Fahrtdaten ab.
+6. Nach der Abstimmung mit Transitous das Cloudflare-Geheimnis `PUSH_MONITORING` auf `true` setzen. Beim Merken einer Fahrt startet die Überwachung dann automatisch. Bei bereits gespeicherten Fahrten lässt sie sich über „Push aktivieren“ einschalten.
 
 ### Alternativ auf einem eigenen Server
 
