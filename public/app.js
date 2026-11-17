@@ -259,7 +259,7 @@ byId('reload-usage').onclick = loadUsage;
 
 setupPunctuality(getJson);
 
-const punctualityLabels = { observed: 'Ankunft gemeldet', forecast: 'Letzte Prognose', cancelled: 'Ausfall gemeldet', unknown: 'Unbekannt' };
+const punctualityLabels = { observed: 'Ankunft bestätigt', inferred: 'Ankunft aus letzter Zeit übernommen', forecast: 'Letzte Prognose', cancelled: 'Ausfall gemeldet', unknown: 'Unbekannt' };
 
 async function loadPunctuality() {
   const button = byId('reload-punctuality');
@@ -273,7 +273,7 @@ async function loadPunctuality() {
       const panel = element('details', null, 'punctuality-route');
       const summary = element('summary', `${route.origin} → ${route.destination}`);
       const rate = route.observed ? Math.round(route.onTime / route.observed * 100) : null;
-      const count = `${route.total} überwacht · ${route.observed} Ankünfte gemeldet`;
+      const count = `${route.total} überwacht · ${route.observed} Ankünfte erfasst`;
       const label = rate === null ? count : `${rate} % pünktlich · ${count}`;
       summary.append(element('small', label, 'muted'));
       const bar = element('div', null, 'usage-bar');
@@ -1240,9 +1240,27 @@ function renderSavedTrips() {
     if (archived(trip)) link.append(element('small', Number.isFinite(trip.confirmedArrival) ? 'Ankunft bestätigt' : 'Nach zuletzt bekannter Ankunft archiviert', 'muted'));
     return link;
   };
+  const groupedCards = (trips) => {
+    const groups = new Map();
+    const dayKey = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Berlin' });
+    const dayLabel = new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit' });
+    const currentYear = dayKey.format(Date.now()).slice(0, 4);
+    for (const trip of trips) {
+      const key = dayKey.format(new Date(trip.journey.startTime));
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(trip);
+    }
+    return [...groups].map(([key, entries]) => {
+      const section = element('section', null, 'saved-day');
+      const date = dayLabel.format(new Date(entries[0].journey.startTime));
+      const heading = element('h3', `${date}${key.slice(0, 4) === currentYear ? '' : ' ' + key.slice(0, 4)}:`, 'saved-day-title');
+      section.append(heading, ...entries.sort((a, b) => Date.parse(a.journey.startTime) - Date.parse(b.journey.startTime)).map(card));
+      return section;
+    });
+  };
   byId('saved-empty').hidden = Boolean(active.length);
-  byId('saved-items').replaceChildren(...active.map(card));
-  byId('archived-items').replaceChildren(...old.map(card));
+  byId('saved-items').replaceChildren(...groupedCards(active));
+  byId('archived-items').replaceChildren(...groupedCards(old));
   byId('archive-count').textContent = 'Alte Verbindungen (' + old.length + ')';
   byId('archive-empty').hidden = Boolean(old.length);
   renderNextTrip();

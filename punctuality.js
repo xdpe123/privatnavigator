@@ -2,17 +2,17 @@ const minute = 60_000;
 export const historyWindow = 90 * 24 * 60 * minute;
 const usableForecasts = new Set(['PREDICTED', 'PROPAGATED']);
 
-export function arrivalEvidence(legs, now) {
+export function arrivalEvidence(legs, now, stable = false) {
   const last = legs?.at(-1);
   if (!last) return null;
   const planned = Date.parse(last.scheduledArrival);
   if (legs.some((leg) => leg.cancelled)) {
     return Number.isFinite(planned) && now >= planned ? { kind: 'cancelled', delay: null } : null;
   }
-  const arrival = Date.parse(last.arrival);
+  const arrival = Date.parse(last.arrival || last.scheduledArrival);
   if (!Number.isFinite(planned) || !Number.isFinite(arrival) || arrival > now) return null;
   const kind = last.arrivalReason === 'OBSERVED' ? 'observed'
-    : usableForecasts.has(last.arrivalReason) ? 'forecast' : null;
+    : stable ? 'inferred' : usableForecasts.has(last.arrivalReason) ? 'forecast' : null;
   return kind ? { kind, delay: Math.round((arrival - planned) / 1000) } : null;
 }
 
@@ -34,11 +34,13 @@ const berlinHour = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Berlin',
 const berlinDay = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Berlin' });
 
 function metrics(records) {
-  const observed = records.filter(trip => trip.kind === 'observed' && Number.isFinite(trip.delay));
+  const observed = records.filter(trip => ['observed', 'inferred'].includes(trip.kind) && Number.isFinite(trip.delay));
   const delays = observed.map(trip => trip.delay).sort((a, b) => a - b);
   const percentile = (fraction) => delays.length ? Math.round(delays[Math.max(0, Math.ceil(delays.length * fraction) - 1)] / 60 * 10) / 10 : null;
   return {
     total: records.length, observed: observed.length,
+    confirmed: observed.filter(trip => trip.kind === 'observed').length,
+    inferred: observed.filter(trip => trip.kind === 'inferred').length,
     cancelled: records.filter(trip => trip.kind === 'cancelled').length,
     forecast: records.filter(trip => trip.kind === 'forecast').length,
     unknown: records.filter(trip => trip.kind === 'unknown').length,
@@ -85,12 +87,13 @@ export function summarizeTrips(records, days = 90, now = Date.now()) {
     const key = JSON.stringify([trip.origin, trip.destination]);
     if (!routes.has(key)) routes.set(key, {
       origin: trip.origin, destination: trip.destination, total: 0, observed: 0,
-      onTime: 0, forecast: 0, cancelled: 0, unknown: 0, recent: [],
+      onTime: 0, inferred: 0, forecast: 0, cancelled: 0, unknown: 0, recent: [],
     });
     const route = routes.get(key);
     route.total++;
     route[trip.kind]++;
-    if (trip.kind === 'observed' && trip.delay < 360) route.onTime++;
+    if (trip.kind === 'inferred') route.observed++;
+    if (['observed', 'inferred'].includes(trip.kind) && trip.delay < 360) route.onTime++;
     if (route.recent.length < 8) route.recent.push({
       departure: trip.departure, lines: trip.lines, kind: trip.kind, delay: trip.delay,
     });

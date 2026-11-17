@@ -19,7 +19,7 @@ export function setupPunctuality(getJson) {
       const denominator = total(row);
       const item = make('div', undefined, 'analysis-bar-row');
       const label = make('div', undefined, 'analysis-bar-label');
-      label.append(make('span', row.label), make('span', denominator ? percent(count, denominator) + ' · ' + count + '/' + denominator : 'Keine bestätigte Ankunft'));
+      label.append(make('span', row.label), make('span', denominator ? percent(count, denominator) + ' · ' + count + '/' + denominator : 'Keine erfasste Ankunft'));
       const track = make('div', undefined, 'analysis-track');
       const bar = make('span');
       bar.style.width = denominator ? count / denominator * 100 + '%' : '0%';
@@ -38,7 +38,7 @@ export function setupPunctuality(getJson) {
       get('analysis-status').textContent = 'Für diesen Zeitraum sind noch keine Fahrten erfasst.';
       return;
     }
-    get('analysis-status').textContent = data.total + ' erfasste Fahrten · ' + data.observed + ' bestätigte Ankünfte';
+    get('analysis-status').textContent = data.total + ' erfasste Fahrten · ' + data.observed + ' erfasste Ankünfte · ' + (data.confirmed ?? data.observed) + ' bestätigt · ' + (data.inferred || 0) + ' aus letzter Zeit übernommen';
     const grid = make('div', undefined, 'analysis-metrics');
     for (const [label, value] of [
       ['Pünktliche Ankünfte', percent(data.onTime, data.observed)],
@@ -52,7 +52,7 @@ export function setupPunctuality(getJson) {
       item.append(make('strong', value), make('span', label, 'muted'));
       grid.append(item);
     }
-    content.append(grid, make('p', 'Das 90. Perzentil zeigt die Verspätung, die bei 90 % der bestätigten Ankünfte höchstens erreicht wurde.', 'muted'));
+    content.append(grid, make('p', 'Das 90. Perzentil zeigt die Verspätung, die bei 90 % der erfassten Ankünfte höchstens erreicht wurde.', 'muted'));
     content.append(chart('Ankunftsverspätungen', data.distribution, row => row.count, () => data.observed));
     const labels = { Mon: 'Montag', Tue: 'Dienstag', Wed: 'Mittwoch', Thu: 'Donnerstag', Fri: 'Freitag', Sat: 'Samstag', Sun: 'Sonntag' };
     const weekdays = Object.entries(labels).map(([key, label]) => ({ ...data.weekdays.find(row => row.label === key), label }));
@@ -64,7 +64,7 @@ export function setupPunctuality(getJson) {
     history.append(make('h2', 'Erfasste Fahrten'));
     const list = make('ol', undefined, 'analysis-history');
     const date = new Intl.DateTimeFormat('de-DE', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Europe/Berlin' });
-    const kinds = { observed: 'Bestätigte Ankunft', cancelled: 'Ausfall', forecast: 'Letzte Prognose', unknown: 'Ohne Ankunftsdaten' };
+    const kinds = { observed: 'Bestätigte Ankunft', inferred: 'Ankunft aus letzter Zeit übernommen', cancelled: 'Ausfall', forecast: 'Letzte Prognose', unknown: 'Ohne Ankunftsdaten' };
     for (const trip of data.recent) {
       const item = make('li');
       item.append(make('strong', date.format(trip.departure) + ' · ' + trip.lines),

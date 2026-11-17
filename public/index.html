@@ -188,7 +188,7 @@
     <section class="panel" aria-labelledby="punctuality-title">
       <h2 id="punctuality-title">Pünktlichkeit meiner Strecken</h2>
       <button id="open-punctuality" type="button">Streckenanalyse öffnen</button>
-      <p class="muted">Die letzten 90 Tage aus abgeschlossenen Fahrten mit aktiver Push-Überwachung. Die Quote zählt gemessene Ankünfte am letzten Haltepunkt mit weniger als 6 Minuten Verspätung.</p>
+      <p class="muted">Die letzten 90 Tage aus abgeschlossenen Fahrten mit aktiver Push-Überwachung. Die Quote zählt bestätigte und aus stabilen Zeitangaben übernommene Ankünfte am letzten Haltepunkt mit weniger als 6 Minuten Verspätung.</p>
       <p id="punctuality-status" role="status"></p>
       <div id="punctuality-routes"></div>
       <button id="reload-punctuality" type="button">Fahrtstatistik aktualisieren</button>
@@ -293,7 +293,7 @@
     </div>
     <p id="analysis-status" role="status"></p>
     <div id="analysis-content"></div>
-    <p class="muted">Grundlage sind deine überwachten Fahrten. Pünktlich bedeutet weniger als 6 Minuten Ankunftsverspätung. Prognosen zählen separat. Die Ausfallquote bezieht sich auf alle erfassten Fahrten. Kleine Stichproben erlauben keine verlässliche Vorhersage.</p>
+    <p class="muted">Grundlage sind deine überwachten Fahrten. Pünktlich bedeutet weniger als 6 Minuten Ankunftsverspätung. Eine übernommene Ankunft zählt mit, wenn ihre Zeit einschließlich Verspätung mindestens 5 Minuten vergangen ist und über mindestens 5 Minuten bei erfolgreichen Abfragen unverändert bleibt. Die Herkunft ist bei jeder Fahrt sichtbar. Verbleibende Prognosen zählen separat. Die Ausfallquote bezieht sich auf alle erfassten Fahrten. Kleine Stichproben erlauben keine verlässliche Vorhersage.</p>
   </dialog>
 </body>
 </html>

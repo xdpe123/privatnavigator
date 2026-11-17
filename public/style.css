@@ -334,6 +334,8 @@ a { color: var(--accent); }
 .stops summary { font-size: .85rem; font-weight: 600; }
 .trip-archive > summary { cursor: pointer; font-weight: 650; }
 .trip-archive #archived-items { margin-top: .85rem; }
+.saved-day { margin: 1.2rem 0; }
+.saved-day-title { border-bottom: 1px solid var(--line); padding-bottom: .5rem; margin-bottom: .65rem; font-size: 1rem; color: var(--muted); }
 .analysis-dialog { width: min(100%, 56rem); max-width: 100%; height: 100dvh; max-height: 100dvh; margin: 0 auto; border: 0; border-radius: 0; padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom)); color: var(--ink); background: var(--background); }
 .analysis-dialog::backdrop { background: #0008; }
 .analysis-dialog h1 { font-size: 1.5rem; }

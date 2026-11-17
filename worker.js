@@ -176,6 +176,7 @@ export class TripHistory extends DurableObject {
     this.sql.exec(`INSERT INTO trips (id, origin, destination, lines, departure, kind, delay) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, delay = excluded.delay
       WHERE trips.kind = 'unknown' OR (trips.kind = 'forecast' AND excluded.kind <> 'unknown')
+         OR (trips.kind = 'inferred' AND excluded.kind IN ('inferred','observed','cancelled'))
          OR excluded.kind IN ('observed','cancelled')`,
     trip.id, trip.origin, trip.destination, trip.lines, trip.departure, trip.kind, trip.delay);
   }

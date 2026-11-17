@@ -127,10 +127,15 @@ export function evaluateWatch(watch, latest, now) {
   const legs = latest || watch.baseline;
   const route = [legs[0]?.from, legs.at(-1)?.to].filter(Boolean).join(' → ');
   const body = content && [route, content].filter(Boolean).join('\n').slice(0, 300);
-  const evidence = arrivalEvidence(latest, now);
+  const arrival = Date.parse(latest?.at(-1)?.arrival || latest?.at(-1)?.scheduledArrival);
+  const candidate = Number.isFinite(arrival) ? {
+    arrival, since: watch.arrivalCandidate?.arrival === arrival ? watch.arrivalCandidate.since : now,
+  } : watch.arrivalCandidate;
+  const stable = Boolean(latest && candidate && now >= candidate.arrival + checkInterval && now >= candidate.since + checkInterval);
+  const evidence = arrivalEvidence(latest, now, stable);
   const previous = watch.observation;
   const observation = evidence?.kind === 'observed' || evidence?.kind === 'cancelled' ? evidence
-    : previous?.kind === 'observed' ? previous : evidence || previous;
+    : previous?.kind === 'observed' ? previous : evidence || (latest ? null : previous);
   return {
     message: body ? { title: due.length ? `Fahrtstatus · ${due.at(-1)} Min. vorher` : 'Änderung zu deiner Fahrt', body } : null,
     next: {
@@ -138,7 +143,8 @@ export function evaluateWatch(watch, latest, now) {
       until: Math.max(watch.until, (Date.parse(latest?.at(-1)?.arrival) || 0) + 30 * minute),
       baseline: latest || watch.baseline,
       departed: [...departed],
-      ...(observation ? { observation } : {}),
+      observation: observation || null,
+      ...(candidate ? { arrivalCandidate: candidate } : {}),
       reminders: watch.reminders.filter((offset) => now < watch.departure && !elapsed.includes(offset)),
       nextCheck: nextCheckTime(watch.departure, now),
     },
