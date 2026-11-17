@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
-import { createHash, timingSafeEqual } from 'node:crypto';
 import { generateRequestDetails } from 'web-push';
+import { requireLogin } from './cloud-auth.js';
 import { subscriptionValid } from './push-subscription.js';
 import { createTransitClient } from './transit.js';
 import { transitApi } from './transit-api.js';
@@ -16,12 +16,6 @@ function configured(env) {
     env.PUSH_SUBJECT && env.PUSH_PUBLIC_KEY && env.PUSH_PRIVATE_KEY;
 }
 
-function authorized(request, password) {
-  const expected = `Basic ${btoa(`navigator:${password}`)}`;
-  const hash = (value) => createHash('sha256').update(value).digest();
-  return timingSafeEqual(hash(expected), hash(request.headers.get('Authorization') || ''));
-}
-
 function cloudTransit(env) {
   const usage = env.API_USAGE.getByName('transitous');
   return createTransitClient(env.TRANSITOUS_CONTACT, async (path) => {
@@ -32,13 +26,13 @@ function cloudTransit(env) {
 export default {
   async fetch(request, env) {
     if (!env.PUSH_ACCESS_PASSWORD) return json(503, { error: 'Die private Installation wird eingerichtet.' });
-    if (!authorized(request, env.PUSH_ACCESS_PASSWORD)) {
-      return new Response('Anmeldung erforderlich.', { status: 401, headers: {
-        'WWW-Authenticate': 'Basic realm="Privatnavigator"', 'Cache-Control': 'no-store',
-      } });
-    }
     const url = new URL(request.url);
     try {
+      const { response, renew } = await requireLogin(request, url, env.PUSH_ACCESS_PASSWORD);
+      if (response) return response;
+      if (request.method === 'GET' && url.pathname === '/anmelden') {
+        return new Response(null, { status: 303, headers: { Location: '/', 'Cache-Control': 'no-store' } });
+      }
       if (request.method === 'GET' && url.pathname === '/api/usage') {
         return json(200, await env.API_USAGE.getByName('transitous').report());
       }
@@ -61,7 +55,14 @@ export default {
         if (!env.TRANSITOUS_CONTACT) return json(503, { error: 'Der Fahrplandienst für diese HTTPS-Installation wird eingerichtet.' });
         return await transitApi(request, url, cloudTransit(env), json);
       }
-      return await env.ASSETS.fetch(request);
+      const asset = await env.ASSETS.fetch(request);
+      const page = new Response(asset.body, asset);
+      page.headers.set('Cache-Control', 'private, no-cache');
+      if (renew && url.pathname === '/') {
+        page.headers.set('Set-Cookie', renew);
+        page.headers.set('Cache-Control', 'no-store');
+      }
+      return page;
     } catch (error) {
       if (error.status === 429) return json(429, { error: error.message });
       console.error(error.message);
