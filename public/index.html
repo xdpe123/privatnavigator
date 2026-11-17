@@ -157,6 +157,19 @@
       <label><input type="radio" name="theme" value="light"> Hell</label>
       <label><input type="radio" name="theme" value="dark"> Dunkel</label>
     </fieldset>
+    <section class="panel" aria-labelledby="push-settings-title">
+      <h2 id="push-settings-title">Push-Einstellungen</h2>
+      <form id="push-settings-form">
+        <label class="option"><input id="auto-push" type="checkbox" checked> Push für neu gemerkte Fahrten automatisch aktivieren</label>
+        <fieldset><legend>Meldungsarten</legend><div id="push-option-fields"></div></fieldset>
+        <p class="muted">Die Meldungsarten gelten auch für bereits überwachte Fahrten auf diesem Gerät.</p>
+        <div class="trip-actions">
+          <button id="save-push-settings" class="primary" type="submit">Speichern</button>
+          <button id="allow-push" type="button" hidden>Mitteilungen erlauben</button>
+        </div>
+        <p id="push-settings-status" role="status" hidden></p>
+      </form>
+    </section>
     <section id="settings-push-tests" class="panel" aria-labelledby="push-tests-title" hidden>
       <h2 id="push-tests-title">Push-Mitteilungen testen</h2>
       <label for="push-test-type">Art der Mitteilung</label>

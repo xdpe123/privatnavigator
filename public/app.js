@@ -2,6 +2,7 @@ import { allGroups, modeGroups, ticketGroups } from './search-filters.js';
 import { createRouteMap } from './route-map.js';
 import { alternativeStops, calendarFile, isCancelled, shortestAlternatives, transfersFor, tripTimeline } from './journey-details.js';
 import { setupRecurringTrips } from './recurring-trips.js';
+import { normalizePushOptions, pushOptions } from './push-options.js';
 
 const byId = (id) => document.getElementById(id);
 const clock = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
@@ -14,6 +15,7 @@ const storageKey = 'privatnavigator.favorites.v1';
 const tripStorageKey = 'privatnavigator.trips.v1';
 const filterStorageKey = 'privatnavigator.filters.v1';
 const reloadStorageKey = 'privatnavigator.reload.v1';
+const pushSettingsKey = 'privatnavigator.push-settings.v1';
 const calendar = new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' });
 const dateTimeLabel = new Intl.DateTimeFormat('de-DE', { dateStyle: 'short', timeStyle: 'short' });
 const places = { from: null, to: null };
@@ -29,6 +31,14 @@ const savedRefreshes = new Map();
 let restoreCursor;
 let pushSetup;
 let serviceWorker;
+let automaticPush = true;
+let pushPreferences = normalizePushOptions();
+const pushRegistrations = new Map();
+try {
+  const stored = JSON.parse(localStorage.getItem(pushSettingsKey));
+  automaticPush = stored?.automatic !== false;
+  pushPreferences = normalizePushOptions(stored?.preferences);
+} catch {}
 let filters = { ticket: false, groups: allGroups };
 try {
   const saved = JSON.parse(localStorage.getItem(storageKey));
@@ -891,13 +901,17 @@ function renderJourney(journey, settings = {}) {
       if (current || writeTrips([...savedTrips, trip])) {
         save.textContent = '✓ Fahrt gespeichert';
         save.disabled = true;
-        if (!current && serviceWorker && pushSetup.enabled && Date.parse(journey.endTime) > Date.now()) {
+        if (!current && automaticPush && serviceWorker && pushSetup.enabled && Date.parse(journey.endTime) > Date.now()) {
+          const progress = element('p', 'Push wird aktiviert …', 'muted');
+          progress.setAttribute('role', 'status');
+          details.append(progress);
           try {
             await startTripPush(trip);
+            progress.textContent = 'Fahrt gespeichert · Push ist aktiv.';
           } catch (error) {
-            setStatus('saved-status', error.name === 'NotAllowedError'
+            progress.textContent = error.name === 'NotAllowedError'
               ? 'Fahrt gespeichert. Erlaube Mitteilungen auf dem iPhone, um Updates zu erhalten.'
-              : `Fahrt gespeichert. Push: ${error.message}`);
+              : `Fahrt gespeichert. Push: ${error.message}`;
           }
         }
       }
@@ -956,25 +970,113 @@ async function pushRequest(method, data) {
   const query = method === 'DELETE' ? `?id=${encodeURIComponent(data)}` : '';
   const response = await fetch(`/api/push/watch${query}`, {
     method,
-    ...(method === 'POST' ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) } : {}),
+    ...(['POST', 'PATCH'].includes(method) ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) } : {}),
   });
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error);
+  if (!response.ok) {
+    const error = new Error(result.error);
+    error.status = response.status;
+    throw error;
+  }
   return result;
 }
 
-async function startTripPush(trip) {
-  const subscription = await serviceWorker.pushManager.subscribe({
+function subscribeForPush() {
+  return serviceWorker.pushManager.subscribe({
     userVisibleOnly: true, applicationServerKey: pushSetup.publicKey,
   });
-  const { id } = await pushRequest('POST', {
-    tripKey: trip.key, itineraryId: trip.journey.id, subscription: subscription.toJSON(),
-  });
-  if (!savedTrips.some(({ key }) => key === trip.key) ||
-      !writeTrips(savedTrips.map((item) => item.key === trip.key ? { ...item, watchId: id } : item))) {
-    await pushRequest('DELETE', id);
-  }
 }
+
+function startTripPush(trip, approved) {
+  if (!pushRegistrations.has(trip.key)) {
+    const request = (async () => {
+      const subscription = approved || await subscribeForPush();
+      const { id } = await pushRequest('POST', {
+        tripKey: trip.key, itineraryId: trip.journey.id, subscription: subscription.toJSON(), preferences: pushPreferences,
+      });
+      if (!savedTrips.some(({ key }) => key === trip.key) ||
+          !writeTrips(savedTrips.map((item) => item.key === trip.key ? { ...item, watchId: id } : item))) {
+        await pushRequest('DELETE', id);
+        throw new Error('Die Push-Überwachung konnte nicht gespeichert werden.');
+      }
+    })().finally(() => pushRegistrations.delete(trip.key));
+    pushRegistrations.set(trip.key, request);
+  }
+  return pushRegistrations.get(trip.key);
+}
+
+let bulkPush;
+let savingPushSettings = false;
+function activateUpcomingPush(subscription) {
+  if (!automaticPush || !serviceWorker || !pushSetup.enabled || !navigator.onLine) return Promise.resolve();
+  if (!bulkPush) {
+    bulkPush = (async () => {
+      const approved = subscription || await serviceWorker.pushManager.getSubscription();
+      if (!approved) return;
+      for (const trip of [...savedTrips].sort((a, b) => Date.parse(a.journey.startTime) - Date.parse(b.journey.startTime))) {
+        if (trip.watchId !== undefined || Date.parse(trip.journey.endTime) <= Date.now()) continue;
+        if (!automaticPush || savingPushSettings) break;
+        try {
+          await startTripPush(trip, approved);
+        } catch (error) {
+          setStatus('push-settings-status', error.message);
+          if (error.status === 429) break;
+        }
+      }
+    })().finally(() => { bulkPush = null; });
+  }
+  return bulkPush;
+}
+
+const pushFields = new Map(Object.entries(pushOptions).map(([key, label]) => {
+  const row = element('label', null, 'option');
+  const input = element('input');
+  input.type = 'checkbox';
+  input.checked = pushPreferences[key];
+  row.append(input, document.createTextNode(label));
+  byId('push-option-fields').append(row);
+  return [key, input];
+}));
+byId('auto-push').checked = automaticPush;
+byId('push-settings-form').onsubmit = async (event) => {
+  event.preventDefault();
+  const button = byId('save-push-settings');
+  button.disabled = true;
+  savingPushSettings = true;
+  const automatic = byId('auto-push').checked;
+  const preferences = Object.fromEntries([...pushFields].map(([key, input]) => [key, input.checked]));
+  setStatus('push-settings-status', 'Einstellungen werden gespeichert …');
+  try {
+    await Promise.allSettled(pushRegistrations.values());
+    const ids = savedTrips.flatMap((trip) => trip.watchId ? [trip.watchId] : []);
+    if (ids.length) await pushRequest('PATCH', { ids, preferences });
+    automaticPush = automatic;
+    pushPreferences = preferences;
+    localStorage.setItem(pushSettingsKey, JSON.stringify({ automatic, preferences }));
+    setStatus('push-settings-status', 'Push-Einstellungen gespeichert.');
+  } catch (error) {
+    setStatus('push-settings-status', error.message);
+  } finally {
+    savingPushSettings = false;
+    button.disabled = false;
+  }
+  void activateUpcomingPush().catch(() => {});
+};
+
+byId('allow-push').onclick = async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const subscription = await subscribeForPush();
+    setStatus('push-settings-status', 'Mitteilungen sind erlaubt.');
+    await activateUpcomingPush(subscription);
+  } catch (error) {
+    setStatus('push-settings-status', error.name === 'NotAllowedError'
+      ? 'Erlaube Mitteilungen für Privatnavigator in den iPhone-Einstellungen.' : error.message);
+  } finally {
+    button.disabled = false;
+  }
+};
 
 async function setupPush() {
   if (window.isSecureContext && 'serviceWorker' in navigator) {
@@ -1001,9 +1103,14 @@ async function setupPush() {
       if (!serviceWorker) setStatus('selected-push-test-status', 'Öffne den Privatnavigator auf dem iPhone über sein Home-Bildschirm-Symbol.');
     }
   }
+  if (serviceWorker && pushSetup.enabled) byId('allow-push').hidden = false;
   renderSavedTrips();
   const open = savedTrips.find(({ key }) => location.hash === `#fahrt-${key}`);
   if (open && !savedRefreshes.has(open.key)) openTripLink(false);
+  void activateUpcomingPush().then(() => {
+    const trip = savedTrips.find(({ key }) => location.hash === `#fahrt-${key}`);
+    if (trip?.watchId && !savedRefreshes.has(trip.key)) openTripLink(false);
+  }).catch(() => {});
 }
 
 async function sendPushTest(button, status, type = 'general') {
@@ -1128,7 +1235,7 @@ function renderSavedTrip(trip) {
     const push = element('button', trip.watchId ? 'Push deaktivieren' : 'Push aktivieren');
     push.type = 'button';
     push.disabled = !trip.watchId && Date.parse(trip.journey.endTime) <= Date.now();
-    if (trip.watchId) status.textContent = 'Push ist aktiv. Status etwa 60 und 30 Min. vor Abfahrt sowie bei Änderungen.';
+    if (trip.watchId) status.textContent = 'Push ist aktiv. Die Meldungsarten findest du in den Einstellungen.';
     push.onclick = async () => {
       push.disabled = remove.disabled = true;
       status.textContent = trip.watchId ? 'Push wird deaktiviert …' : 'Push wird aktiviert …';

@@ -1,6 +1,6 @@
 const offlineCache = 'privatnavigator-shell-v1';
 const shellFiles = [
-  '/', '/app.js', '/style.css', '/search-filters.js', '/route-map.js', '/journey-details.js', '/recurring-trips.js',
+  '/', '/app.js', '/style.css', '/search-filters.js', '/route-map.js', '/journey-details.js', '/recurring-trips.js', '/push-options.js',
   '/leaflet/leaflet.js', '/leaflet/leaflet.css', '/navigator-180.png', '/navigator-192.png',
   '/navigator-512.png', '/manifest.webmanifest',
 ];

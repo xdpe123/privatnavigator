@@ -8,6 +8,7 @@ import { evaluateWatch, minute, pendingReminders, snapshot, tripSchedule } from 
 import { apiLimit, budgetError, day, dayKey, historyDays, requestKind, usageReport } from './usage.js';
 import { completedTrip, historyWindow, summarizeTrips } from './punctuality.js';
 import { pushPreview, pushTestTypes } from './push-previews.js';
+import { normalizePushOptions, pushWatchIds } from './public/push-options.js';
 
 function json(status, body) {
   return Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -159,7 +160,7 @@ export class TripWatches extends DurableObject {
       if (id) await storage.delete(id);
       return json(200, { ok: true });
     }
-    if (request.method !== 'POST') return json(405, { error: 'Diese Push-Aktion ist nicht verfügbar.' });
+    if (!['POST', 'PATCH'].includes(request.method)) return json(405, { error: 'Diese Push-Aktion ist nicht verfügbar.' });
     let body;
     try {
       const text = await request.text();
@@ -167,6 +168,18 @@ export class TripWatches extends DurableObject {
       body = JSON.parse(text);
     } catch {
       return json(400, { error: 'Ungültige Push-Anfrage.' });
+    }
+    const preferences = normalizePushOptions(body?.preferences);
+    if (request.method === 'PATCH') {
+      const ids = pushWatchIds(body?.ids);
+      if (!ids || !body.preferences || typeof body.preferences !== 'object') return json(400, { error: 'Ungültige Push-Einstellungen.' });
+      await storage.transaction(async (tx) => {
+        for (const id of ids) {
+          const watch = await tx.get(id);
+          if (watch) await tx.put(id, { ...watch, preferences });
+        }
+      });
+      return json(200, { ok: true });
     }
     if (!body || !subscriptionValid(body.subscription) || typeof body.itineraryId !== 'string' ||
         !body.itineraryId || body.itineraryId.length > 7000 || !/^[a-f0-9]{24}$/.test(body.tripKey)) {
@@ -181,11 +194,14 @@ export class TripWatches extends DurableObject {
       const active = [...(await tx.list()).values()].filter((watch) => watch.until > Date.now());
       const existing = active.find((watch) => watch.tripKey === body.tripKey &&
         watch.subscription.endpoint === body.subscription.endpoint);
-      if (existing) return json(200, { id: existing.id });
+      if (existing) {
+        await tx.put(existing.id, { ...existing, preferences });
+        return json(200, { id: existing.id });
+      }
       if (active.length >= 5) return json(429, { error: 'Es können höchstens fünf Fahrten abonniert werden.' });
       const id = crypto.randomUUID();
       const watch = { id, tripKey: body.tripKey, itineraryId: body.itineraryId,
-        subscription: body.subscription, ...schedule, baseline: snapshot(journey) };
+        subscription: body.subscription, preferences, ...schedule, baseline: snapshot(journey) };
       await tx.put(id, watch);
       await scheduleAlarm(tx, [...active, watch]);
       return json(200, { id });
@@ -211,11 +227,12 @@ export class TripWatches extends DurableObject {
       } catch (error) {
         console.warn('Fahrtstatus nicht abrufbar:', error.message);
       }
-      if (!await storage.get(id)) continue;
-      const { message, next } = evaluateWatch(watch, latest, now);
+      const current = await storage.get(id);
+      if (!current) continue;
+      const { message, next } = evaluateWatch(current, latest, now);
       delete next.retryAt;
       try {
-        if (message) await deliver(this.env, watch.subscription, { ...message, url: `/#fahrt-${watch.tripKey}` });
+        if (message) await deliver(this.env, current.subscription, { ...message, url: `/#fahrt-${current.tripKey}` });
       } catch (error) {
         if ([404, 410].includes(error.status)) {
           await storage.delete(id);
@@ -223,12 +240,14 @@ export class TripWatches extends DurableObject {
         }
         console.warn('Push-Zustellung fehlgeschlagen:', error.message);
         await storage.transaction(async (tx) => {
-          if (await tx.get(id)) await tx.put(id, { ...watch, observation: next.observation || watch.observation || null, retryAt: Date.now() + minute });
+          const existing = await tx.get(id);
+          if (existing) await tx.put(id, { ...existing, observation: next.observation || existing.observation || null, retryAt: Date.now() + minute });
         });
         continue;
       }
       await storage.transaction(async (tx) => {
-        if (await tx.get(id)) await tx.put(id, next);
+        const existing = await tx.get(id);
+        if (existing) await tx.put(id, { ...next, preferences: existing.preferences || next.preferences || null });
       });
     }
     await storage.transaction(async (tx) => scheduleAlarm(tx, [...(await tx.list()).values()]));

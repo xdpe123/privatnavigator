@@ -80,6 +80,8 @@ label { display: block; font-size: .9rem; font-weight: 650; }
 .field { display: flex; gap: .35rem; margin-top: .35rem; }
 .field input { flex: 1; min-width: 0; }
 #settings-push-tests select { flex: 1; min-width: 0; }
+#push-settings-form fieldset { border: 1px solid var(--line); border-radius: .65rem; margin: .65rem 0; }
+#push-settings-form legend { padding-inline: .35rem; font-weight: 650; }
 input, select, button {
   font: inherit;
   font-size: 1rem;

@@ -2,6 +2,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { sendNotification, setVapidDetails } from 'web-push';
 import { subscriptionValid } from './push-subscription.js';
+import { normalizePushOptions, pushWatchIds } from './public/push-options.js';
 import { evaluateWatch, minute, pendingReminders, snapshot, tripSchedule } from './trip-monitor.js';
 
 const stateFile = new URL('./push-watches.json', import.meta.url);
@@ -65,7 +66,7 @@ export async function handlePush(request, response, url, json, refreshJourney) {
     persist(watches.filter((watch) => watch.id !== url.searchParams.get('id')));
     return json(response, 200, { ok: true });
   }
-  if (request.method !== 'POST' || url.pathname !== '/api/push/watch') {
+  if (!['POST', 'PATCH'].includes(request.method) || url.pathname !== '/api/push/watch') {
     return json(response, 405, { error: 'Diese Push-Aktion ist nicht verfügbar.' });
   }
   let body;
@@ -73,6 +74,13 @@ export async function handlePush(request, response, url, json, refreshJourney) {
     body = await readBody(request);
   } catch {
     return json(response, 400, { error: 'Ungültige Push-Anfrage.' });
+  }
+  const preferences = normalizePushOptions(body?.preferences);
+  if (request.method === 'PATCH') {
+    const ids = pushWatchIds(body?.ids);
+    if (!ids || !body.preferences || typeof body.preferences !== 'object') return json(response, 400, { error: 'Ungültige Push-Einstellungen.' });
+    persist(watches.map((watch) => ids.has(watch.id) ? { ...watch, preferences } : watch));
+    return json(response, 200, { ok: true });
   }
   if (!body || !subscriptionValid(body.subscription) ||
       typeof body.itineraryId !== 'string' || !body.itineraryId || body.itineraryId.length > 7000 ||
@@ -94,6 +102,7 @@ export async function handlePush(request, response, url, json, refreshJourney) {
     tripKey: body.tripKey,
     itineraryId: body.itineraryId,
     subscription: body.subscription,
+    preferences,
     ...schedule,
     baseline: snapshot(journey),
   };
