@@ -6,6 +6,8 @@ import { createTransitClient } from './transit.js';
 import { transitApi } from './transit-api.js';
 import { evaluateWatch, minute, pendingReminders, snapshot, tripSchedule } from './trip-monitor.js';
 import { apiLimit, budgetError, day, dayKey, historyDays, requestKind, usageReport } from './usage.js';
+import { completedTrip, historyWindow, summarizeTrips } from './punctuality.js';
+import { pushPreview, pushTestTypes } from './push-previews.js';
 
 function json(status, body) {
   return Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -36,11 +38,15 @@ export default {
       if (request.method === 'GET' && url.pathname === '/api/usage') {
         return json(200, await env.API_USAGE.getByName('transitous').report());
       }
+      if (request.method === 'GET' && url.pathname === '/api/punctuality') {
+        return json(200, { routes: await env.TRIP_HISTORY.getByName('punctuality').report() });
+      }
       if (request.method === 'GET' && url.pathname === '/api/push') {
         const ready = Boolean(configured(env));
         return json(200, {
           enabled: ready && env.PUSH_MONITORING === 'true',
           testEnabled: ready,
+          testTypes: ready ? pushTestTypes : [],
           publicKey: ready ? env.PUSH_PUBLIC_KEY : null,
         });
       }
@@ -100,20 +106,42 @@ export class ApiUsage extends DurableObject {
   }
 }
 
+export class TripHistory extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.sql = ctx.storage.sql;
+    this.sql.exec('CREATE TABLE IF NOT EXISTS trips (id TEXT PRIMARY KEY, origin TEXT, destination TEXT, lines TEXT, departure INTEGER, kind TEXT, delay INTEGER)');
+    this.sql.exec('CREATE INDEX IF NOT EXISTS trip_date ON trips(departure)');
+  }
+
+  record(trip) {
+    this.sql.exec('DELETE FROM trips WHERE departure < ?', Date.now() - historyWindow);
+    this.sql.exec(`INSERT INTO trips (id, origin, destination, lines, departure, kind, delay) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, delay = excluded.delay
+      WHERE trips.kind = 'unknown' OR (trips.kind = 'forecast' AND excluded.kind <> 'unknown')
+         OR excluded.kind IN ('observed','cancelled')`,
+    trip.id, trip.origin, trip.destination, trip.lines, trip.departure, trip.kind, trip.delay);
+  }
+
+  report() {
+    return summarizeTrips(this.sql.exec('SELECT origin, destination, lines, departure, kind, delay FROM trips WHERE departure >= ? ORDER BY departure DESC',
+      Date.now() - historyWindow).toArray());
+  }
+}
+
 export class TripWatches extends DurableObject {
   async fetch(request) {
     const storage = this.ctx.storage;
     const path = new URL(request.url).pathname;
     if (path === '/api/push/test') {
       if (request.method !== 'POST') return json(405, { error: 'Diese Push-Aktion ist nicht verfügbar.' });
-      const subscription = await request.json().catch(() => null);
+      const payload = await request.json().catch(() => null);
+      const subscription = payload?.subscription || payload;
       if (!subscriptionValid(subscription)) return json(400, { error: 'Für diesen Test ist ein Apple-Push-Abo nötig.' });
+      const preview = pushPreview(payload?.type || 'general');
+      if (!preview) return json(400, { error: 'Diese Push-Testart ist nicht verfügbar.' });
       try {
-        await deliver(this.env, subscription, {
-          title: 'Privatnavigator · Push-Test',
-          body: 'Apple-Push funktioniert. Tippe hier, um den Privatnavigator zu öffnen.',
-          url: '/',
-        });
+        await deliver(this.env, subscription, preview);
         return json(200, { ok: true });
       } catch (error) {
         console.warn('Apple-Push-Test fehlgeschlagen:', error.name, error.message);
@@ -171,6 +199,8 @@ export class TripWatches extends DurableObject {
     const { refreshJourney } = cloudTransit(this.env);
     for (const [id, watch] of await storage.list()) {
       if (watch.until <= now) {
+        const trip = completedTrip(watch);
+        if (trip) await this.env.TRIP_HISTORY.getByName('punctuality').record(trip);
         await storage.delete(id);
         continue;
       }
@@ -193,7 +223,7 @@ export class TripWatches extends DurableObject {
         }
         console.warn('Push-Zustellung fehlgeschlagen:', error.message);
         await storage.transaction(async (tx) => {
-          if (await tx.get(id)) await tx.put(id, { ...watch, retryAt: Date.now() + minute });
+          if (await tx.get(id)) await tx.put(id, { ...watch, observation: next.observation || watch.observation || null, retryAt: Date.now() + minute });
         });
         continue;
       }

@@ -1,3 +1,5 @@
+import { arrivalEvidence } from './punctuality.js';
+
 export const minute = 60_000;
 export const checkInterval = 5 * minute;
 const reminderOffsets = [60, 30];
@@ -17,6 +19,7 @@ export function snapshot(journey) {
       arrival: leg.endTime,
       scheduledDeparture: leg.scheduledStartTime || leg.from.scheduledDeparture,
       scheduledArrival: leg.scheduledEndTime || leg.to.scheduledArrival,
+      arrivalReason: leg.to.arrivalTimestampReason,
       realTime: Boolean(leg.realTime),
       track: leg.from.track || leg.from.scheduledTrack || '',
       arrivalTrack: leg.to.track || leg.to.scheduledTrack || '',
@@ -96,12 +99,17 @@ export function evaluateWatch(watch, latest, now) {
   const legs = latest || watch.baseline;
   const route = [legs[0]?.from, legs.at(-1)?.to].filter(Boolean).join(' → ');
   const body = content && [route, content].filter(Boolean).join('\n').slice(0, 300);
+  const evidence = arrivalEvidence(latest, now);
+  const previous = watch.observation;
+  const observation = evidence?.kind === 'observed' || evidence?.kind === 'cancelled' ? evidence
+    : previous?.kind === 'observed' ? previous : evidence || previous;
   return {
     message: body ? { title: due.length ? `Fahrtstatus · ${due.at(-1)} Min. vorher` : 'Änderung zu deiner Fahrt', body } : null,
     next: {
       ...watch,
       until: Math.max(watch.until, (Date.parse(latest?.at(-1)?.arrival) || 0) + 30 * minute),
       baseline: latest || watch.baseline,
+      ...(observation ? { observation } : {}),
       reminders: watch.reminders.filter((offset) => now < watch.departure && !due.includes(offset)),
       nextCheck: now + checkInterval,
     },

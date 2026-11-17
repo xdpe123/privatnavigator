@@ -239,6 +239,54 @@ async function loadUsage() {
 
 byId('reload-usage').onclick = loadUsage;
 
+const punctualityLabels = { observed: 'Ankunft gemeldet', forecast: 'Letzte Prognose', cancelled: 'Ausfall gemeldet', unknown: 'Unbekannt' };
+
+async function loadPunctuality() {
+  const button = byId('reload-punctuality');
+  if (button.disabled) return;
+  button.disabled = true;
+  setStatus('punctuality-status', 'Fahrtstatistik wird geladen …');
+  try {
+    const { routes, cloudOnly } = await getJson('/api/punctuality', {});
+    const list = byId('punctuality-routes');
+    list.replaceChildren(...routes.map((route) => {
+      const panel = element('details', null, 'punctuality-route');
+      const summary = element('summary', `${route.origin} → ${route.destination}`);
+      const rate = route.observed ? Math.round(route.onTime / route.observed * 100) : null;
+      const count = `${route.total} überwacht · ${route.observed} Ankünfte gemeldet`;
+      const label = rate === null ? count : `${rate} % pünktlich · ${count}`;
+      summary.append(element('small', label, 'muted'));
+      const bar = element('div', null, 'usage-bar');
+      bar.setAttribute('role', 'img');
+      bar.setAttribute('aria-label', `${route.onTime} pünktlich, ${route.observed - route.onTime} verspätet, ${route.forecast} Prognosen, ${route.cancelled} Ausfälle, ${route.unknown} unbekannt`);
+      for (const [kind, total] of Object.entries({
+        onTime: route.onTime, late: route.observed - route.onTime,
+        forecast: route.forecast, cancelled: route.cancelled, unknown: route.unknown,
+      })) {
+        const segment = element('span', null, `punctuality-${kind}`);
+        segment.style.width = `${total / route.total * 100}%`;
+        bar.append(segment);
+      }
+      const detail = element('ul', null, 'punctuality-recent');
+      for (const row of route.recent) {
+        const minutes = row.delay === null ? null : Math.round(row.delay / 60);
+        const delay = minutes === null ? '' : ` · ${minutes > 0 ? '+' : ''}${minutes} Min.`;
+        detail.append(element('li', `${dateTimeLabel.format(new Date(row.departure))} · ${row.lines} · ${punctualityLabels[row.kind]}${delay}`));
+      }
+      panel.append(summary, bar, element('p', `${route.forecast} Prognosen · ${route.cancelled} Ausfälle · ${route.unknown} ohne verwertbare Ankunftsdaten`, 'muted'), detail);
+      return panel;
+    }));
+    setStatus('punctuality-status', cloudOnly ? 'Die Fahrtstatistik ist in der HTTPS-App verfügbar.'
+      : routes.length ? '' : 'Die Statistik beginnt mit diesem Update. Abgeschlossene überwachte Fahrten erscheinen hier nach und nach.');
+  } catch (error) {
+    setStatus('punctuality-status', error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+byId('reload-punctuality').onclick = loadPunctuality;
+
 for (const option of document.querySelectorAll('input[name="theme"]')) {
   option.checked = option.value === (document.documentElement.dataset.theme || 'light');
   option.onchange = () => {
@@ -275,7 +323,10 @@ function showView() {
     else tab.removeAttribute('aria-current');
   }
   window.scrollTo(0, 0);
-  if (view === 'settings') void loadUsage();
+  if (view === 'settings') {
+    void loadUsage();
+    void loadPunctuality();
+  }
   if (view === 'saved-trips') recurringTrips.render();
 }
 
@@ -939,21 +990,32 @@ async function setupPush() {
     byId('push-test').hidden = false;
     byId('send-push-test').disabled = !serviceWorker;
     if (!serviceWorker) setStatus('push-test-status', 'Auf dem iPhone in Safari zum Home-Bildschirm hinzufügen und über das App-Symbol öffnen.');
+    if (pushSetup.testTypes?.length) {
+      byId('settings-push-tests').hidden = false;
+      byId('push-test-type').replaceChildren(...pushSetup.testTypes.map(({ type, label }) => {
+        const option = element('option', label);
+        option.value = type;
+        return option;
+      }));
+      byId('send-selected-push-test').disabled = !serviceWorker;
+      if (!serviceWorker) setStatus('selected-push-test-status', 'Öffne den Privatnavigator auf dem iPhone über sein Home-Bildschirm-Symbol.');
+    }
   }
   renderSavedTrips();
   const open = savedTrips.find(({ key }) => location.hash === `#fahrt-${key}`);
   if (open && !savedRefreshes.has(open.key)) openTripLink(false);
 }
 
-byId('send-push-test').onclick = async () => {
-  const button = byId('send-push-test');
+async function sendPushTest(button, status, type = 'general') {
   button.disabled = true;
+  setStatus(status, 'Testmitteilung wird gesendet …');
   try {
     const subscription = await serviceWorker.pushManager.subscribe({
       userVisibleOnly: true, applicationServerKey: pushSetup.publicKey,
     });
     const response = await fetch('/api/push/test', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(subscription.toJSON()),
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, subscription: subscription.toJSON() }),
     });
     const result = await response.json();
     if (!response.ok) {
@@ -963,14 +1025,18 @@ byId('send-push-test').onclick = async () => {
       }
       throw new Error(result.diagnostic ? `${result.error} (${result.diagnostic})` : result.error);
     }
-    setStatus('push-test-status', 'Apple hat die Testmitteilung angenommen. Prüfe deine Mitteilungszentrale.');
+    setStatus(status, 'Apple hat die Testmitteilung angenommen. Prüfe deine Mitteilungszentrale.');
   } catch (error) {
-    setStatus('push-test-status', error.name === 'NotAllowedError'
+    setStatus(status, error.name === 'NotAllowedError'
       ? 'Erlaube Mitteilungen in den iPhone-Einstellungen für diese Web-App.' : error.message);
   } finally {
     button.disabled = false;
   }
-};
+}
+
+byId('send-push-test').onclick = (event) => sendPushTest(event.currentTarget, 'push-test-status');
+byId('send-selected-push-test').onclick = (event) =>
+  sendPushTest(event.currentTarget, 'selected-push-test-status', byId('push-test-type').value);
 
 function nextSavedTrip() {
   const now = Date.now();

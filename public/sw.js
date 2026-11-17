@@ -47,10 +47,10 @@ self.addEventListener('fetch', (event) => {
 });
 
 self.addEventListener('push', (event) => {
-  const { title, body, url } = event.data.json();
+  const { title, body, url, tag } = event.data.json();
   event.waitUntil((async () => {
     await self.registration.showNotification(title, {
-      body, icon: '/navigator-192.png', tag: url, data: { url },
+      body, icon: '/navigator-192.png', tag: tag || url, data: { url },
     });
     if ('setAppBadge' in navigator) {
       try { await navigator.setAppBadge(1); } catch {}

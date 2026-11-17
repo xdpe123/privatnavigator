@@ -40,6 +40,7 @@ const server = createServer(async (request, response) => {
   try {
     if (!authorizePushSite(request, response)) return;
     if (request.method === 'GET' && url.pathname === '/api/usage') return json(response, 200, report());
+    if (request.method === 'GET' && url.pathname === '/api/punctuality') return json(response, 200, { routes: [], cloudOnly: true });
     if (url.pathname.startsWith('/api/push')) return await handlePush(request, response, url, json, refreshJourney);
     if (request.method !== 'GET') return json(response, 405, { error: 'Nur GET ist verfügbar.' });
     if (url.pathname.startsWith('/api/')) return await transitApi(request, url, transit, (status, body) => json(response, status, body));

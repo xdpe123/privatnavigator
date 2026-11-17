@@ -79,6 +79,7 @@ h3 { margin: 0 0 .35rem; font-size: 1rem; }
 label { display: block; font-size: .9rem; font-weight: 650; }
 .field { display: flex; gap: .35rem; margin-top: .35rem; }
 .field input { flex: 1; min-width: 0; }
+#settings-push-tests select { flex: 1; min-width: 0; }
 input, select, button {
   font: inherit;
   font-size: 1rem;
@@ -281,6 +282,16 @@ dialog legend { font-weight: 700; padding: 0 .35rem; }
 .usage-updates { --usage-color: #15654d; }
 .usage-bar { display: flex; min-height: 9px; overflow: hidden; background: var(--field-hover); border-radius: .2rem; }
 .usage-bar > span { background: var(--usage-color); }
+.punctuality-route { padding: .65rem 0; border-top: 1px solid var(--line); margin-bottom: .45rem; }
+.punctuality-route summary { cursor: pointer; font-weight: 650; }
+.punctuality-route summary small { display: block; font-weight: 500; margin: .25rem 0 .4rem; }
+.punctuality-route .usage-bar { margin-top: .55rem; }
+.punctuality-route p, .punctuality-recent { font-size: .84rem; }
+.punctuality-onTime { --usage-color: #238164; }
+.punctuality-late { --usage-color: #d28b26; }
+.punctuality-forecast { --usage-color: #397db3; }
+.punctuality-cancelled { --usage-color: #d53550; }
+.punctuality-unknown { --usage-color: #848997; }
 .legs { padding-left: 1.25rem; margin: 1rem 0 .25rem; }
 .leg { padding: .2rem 0 .75rem .3rem; }
 .leg p { margin: .25rem 0; }

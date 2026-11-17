@@ -157,6 +157,22 @@
       <label><input type="radio" name="theme" value="light"> Hell</label>
       <label><input type="radio" name="theme" value="dark"> Dunkel</label>
     </fieldset>
+    <section id="settings-push-tests" class="panel" aria-labelledby="push-tests-title" hidden>
+      <h2 id="push-tests-title">Push-Mitteilungen testen</h2>
+      <label for="push-test-type">Art der Mitteilung</label>
+      <div class="field">
+        <select id="push-test-type"></select>
+        <button id="send-selected-push-test" type="button">Test senden</button>
+      </div>
+      <p id="selected-push-test-status" role="status" hidden></p>
+    </section>
+    <section class="panel" aria-labelledby="punctuality-title">
+      <h2 id="punctuality-title">Pünktlichkeit meiner Strecken</h2>
+      <p class="muted">Die letzten 90 Tage aus abgeschlossenen Fahrten mit aktiver Push-Überwachung. Die Quote zählt gemessene Ankünfte am letzten Haltepunkt mit weniger als 6 Minuten Verspätung.</p>
+      <p id="punctuality-status" role="status"></p>
+      <div id="punctuality-routes"></div>
+      <button id="reload-punctuality" type="button">Fahrtstatistik aktualisieren</button>
+    </section>
     <div class="panel">
       <h2>Transitous-API</h2>
       <p id="usage-status" role="status"></p>
