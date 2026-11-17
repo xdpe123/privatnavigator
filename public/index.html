@@ -73,8 +73,8 @@
       <p id="filter-summary" class="muted" hidden></p>
       <p id="form-status" role="status" hidden></p>
     </form>
-    <section id="favorites" class="panel" hidden aria-labelledby="favorites-title">
-      <h2 id="favorites-title">Favoriten</h2>
+    <section id="favorites" class="panel" aria-labelledby="favorites-title">
+      <div class="section-heading"><h2 id="favorites-title">Favoriten</h2><a href="#favoriten">Verwalten</a></div>
       <div id="favorite-items" class="favorite-items"></div>
     </section>
     </section>
@@ -126,6 +126,28 @@
         </div>
         <p id="transfer-status" role="status" hidden></p>
       </details>
+    </section>
+    <section id="journey-view" aria-labelledby="journey-view-title" hidden>
+      <div class="result-top">
+        <a class="result-icon" href="#saved-trips" aria-label="Zurück zu Meine Fahrten">‹</a>
+        <h1 id="journey-view-title">Fahrt</h1>
+        <details id="journey-menu" class="journey-menu" hidden>
+          <summary class="result-icon" aria-label="Reise bearbeiten">⋯</summary>
+          <div class="panel"><button id="rename-recurring" type="button">Umbenennen</button></div>
+        </details>
+      </div>
+      <p id="offline-journey" class="notice" hidden>Offline · gespeicherter Fahrtdatenstand</p>
+      <div id="journey-view-body"></div>
+    </section>
+    <section id="favorites-view" aria-labelledby="favorites-view-title" hidden>
+      <div class="result-top"><a class="result-icon" href="#suche" aria-label="Zurück zur Suche">‹</a><h1 id="favorites-view-title">Favoriten</h1></div>
+      <form id="add-favorite" class="panel">
+        <label for="favorite-search">Haltestelle hinzufügen</label>
+        <div class="field"><input id="favorite-search" type="search" placeholder="Bahnhof oder Haltestelle" minlength="3" required><button>Suchen</button></div>
+        <p id="favorite-search-status" role="status" hidden></p>
+        <ul id="favorite-search-results" class="favorite-search-results"></ul>
+      </form>
+      <div id="favorite-manager" class="panel"></div>
     </section>
     <section id="settings" aria-labelledby="settings-title" hidden>
     <h1 id="settings-title">Einstellungen</h1>
@@ -215,6 +237,15 @@
         <button class="primary" type="submit">Wiederholung speichern</button>
         <button id="cancel-recurring" type="button">Abbrechen</button>
       </div>
+    </form>
+  </dialog>
+  <dialog id="rename-dialog" aria-labelledby="rename-title">
+    <form id="rename-form">
+      <h2 id="rename-title">Umbenennen</h2>
+      <label for="rename-value">Name</label>
+      <input id="rename-value" maxlength="64" autocomplete="off">
+      <p id="rename-status" role="status" hidden></p>
+      <div class="trip-actions"><button class="primary" type="submit">Speichern</button><button id="cancel-rename" type="button">Abbrechen</button></div>
     </form>
   </dialog>
 </body>

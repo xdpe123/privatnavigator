@@ -10,6 +10,7 @@ const weekdayLabels = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
 const weekdays = [1, 2, 3, 4, 5, 6, 0];
 const day = 86_400_000;
 const storageKey = 'privatnavigator.recurring.v1';
+const snapshotKey = 'privatnavigator.recurring.snapshots.v1';
 
 function localParts(value) {
   return datetime.format(new Date(value)).split(' ');
@@ -105,35 +106,48 @@ export function setupRecurringTrips({ getJson, renderJourney, isCancelled }) {
 
   function render() {
     get('recurring-empty').hidden = rules.length > 0;
-    list.replaceChildren(...rules.map((rule) => {
-      const details = make('details', null, 'panel recurring-trip');
-      const next = nextOccurrence(rule);
-      const summary = make('summary');
-      summary.append(make('strong', `${rule.from.name} → ${rule.to.name}`),
+    const ordered = rules.map((rule) => ({ rule, next: nextOccurrence(rule) }))
+      .sort((a, b) => (a.next ?? Infinity) - (b.next ?? Infinity));
+    list.replaceChildren(...ordered.map(({ rule, next }) => {
+      const card = make('a', null, 'panel recurring-trip');
+      card.href = `#wiederholung-${encodeURIComponent(rule.key)}`;
+      card.append(make('strong', rule.label || `${rule.from.name} → ${rule.to.name}`),
         make('span', `${rule.days.length === 7 ? 'Täglich' : weekdays.filter((day) => rule.days.includes(day)).map((day) => weekdayLabels[day]).join(', ')} · ${rule.time} Uhr`, 'muted'),
         make('span', next === null ? 'Kein Termin gefunden' : `Nächste Fahrt · ${dateLabel.format(next)}`, 'muted'));
+      return card;
+    }));
+  }
+
+  async function openDetail(rule, container) {
       const output = make('div', null, 'recurring-journey');
-      const status = make('p', null, 'muted');
+      const status = make('p', 'Verbindung wird geladen …', 'muted');
       status.setAttribute('role', 'status');
       const remove = make('button', 'Wiederholung entfernen');
       remove.type = 'button';
       remove.onclick = () => {
         try {
           write(rules.filter(({ key }) => key !== rule.key));
+          location.hash = '#saved-trips';
         } catch {
           status.textContent = 'Die Wiederholung konnte nicht entfernt werden.';
         }
       };
-      let loaded;
-      let loading;
-      details.ontoggle = async () => {
-        if (!details.open || loading) return;
+      container.append(make('p', `${rule.from.name} → ${rule.to.name}`, 'muted'), status, output, remove);
+      let snapshots = {};
+      try { snapshots = JSON.parse(localStorage.getItem(snapshotKey)) || {}; } catch {}
+      function show(trip) {
+        const detail = renderJourney(trip, { from: rule.from, to: rule.to, options: rule.options, saved: true, recurring: true });
+        detail.open = true;
+        detail.classList.add('static-journey');
+        output.replaceChildren(detail);
+      }
         const occurrence = nextOccurrence(rule);
-        if (occurrence === null || occurrence === loaded) return;
-        loading = true;
-        output.replaceChildren();
-        status.textContent = 'Verbindung wird geladen …';
+        if (occurrence === null) {
+          status.textContent = 'Kein Termin gefunden.';
+          return;
+        }
         try {
+          if (!navigator.onLine) throw new Error('Offline');
           const time = new Date(Math.max(Date.now() - 60_000, occurrence - 300_000)).toISOString();
           const routes = await getJson('/api/journeys', {
             from: rule.from.id, to: rule.to.id, time, arriveBy: 'false', cancellations: 'true', paged: 'true',
@@ -144,18 +158,23 @@ export function setupRecurringTrips({ getJson, renderJourney, isCancelled }) {
           status.textContent = found?.fallback ? 'Die gewohnte Fahrt wurde nicht gefunden. Hier ist die früheste passende Weiterreise.'
             : found ? '' : 'Für diesen Termin wurde keine passende Verbindung gefunden.';
           if (found) {
-            output.append(renderJourney(found.trip, { from: rule.from, to: rule.to, options: rule.options, saved: true, recurring: true }));
-            loaded = occurrence;
+            show(found.trip);
+            snapshots[rule.key] = { trip: found.trip, saved: Date.now() };
+            try {
+              localStorage.setItem(snapshotKey, JSON.stringify(Object.fromEntries(
+                Object.entries(snapshots).sort((a, b) => b[1].saved - a[1].saved).slice(0, 12)
+              )));
+            } catch {}
           }
         } catch (error) {
-          status.textContent = error.message;
-        } finally {
-          loading = false;
+          const snapshot = Object.hasOwn(snapshots, rule.key) ? snapshots[rule.key] : null;
+          if (snapshot?.trip) {
+            status.textContent = `Gespeicherter Stand · ${dateLabel.format(new Date(snapshot.trip.startTime))}`;
+            show(snapshot.trip);
+          } else {
+            status.textContent = navigator.onLine ? error.message : 'Offline ist eine Wiederholung verfügbar, nachdem ihre Fahrt einmal geladen wurde.';
+          }
         }
-      };
-      details.append(summary, status, output, remove);
-      return details;
-    }));
   }
 
   form.onsubmit = (event) => {
@@ -169,7 +188,8 @@ export function setupRecurringTrips({ getJson, renderJourney, isCancelled }) {
     const rule = { ...entry, time, days };
     const key = JSON.stringify([rule.from.id, rule.to.id, time, days]);
     try {
-      write([...rules.filter((item) => item.key !== key), { ...rule, key }]);
+      const label = rules.find((item) => item.key === key)?.label;
+      write([...rules.filter((item) => item.key !== key), { ...rule, key, label }]);
       dialog.close();
       location.hash = '#saved-trips';
     } catch {
@@ -180,6 +200,11 @@ export function setupRecurringTrips({ getJson, renderJourney, isCancelled }) {
   render();
   return {
     render,
+    openDetail,
+    find: (key) => rules.find((rule) => rule.key === key),
+    rename(key, label) {
+      write(rules.map((rule) => rule.key === key ? { ...rule, label } : rule));
+    },
     open(journey, from, to, options) {
       const [start, time] = localParts(scheduledDeparture(journey));
       entry = { from, to, options, start, lines: serviceLines(journey) };

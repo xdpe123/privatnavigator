@@ -57,7 +57,7 @@ header a { text-decoration: none; }
 .nav-items svg { width: 1.4rem; height: 1.4rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .nav-knobs { stroke-width: 3; }
 main { padding-top: clamp(1.2rem, 4vw, 3rem); }
-body[data-view="results"] main { padding-top: calc(.8rem + env(safe-area-inset-top, 0px)); }
+body:is([data-view="results"], [data-view="journey-view"], [data-view="favorites-view"]) main { padding-top: calc(.8rem + env(safe-area-inset-top, 0px)); }
 h1 { margin: 0 0 1.1rem; font-size: clamp(1.75rem, 5vw, 3rem); letter-spacing: -.035em; }
 h2 { margin: 0 0 .7rem; font-size: 1.22rem; }
 h3 { margin: 0 0 .35rem; font-size: 1rem; }
@@ -179,6 +179,25 @@ button:disabled { opacity: .55; cursor: default; }
 .transfer-checks > p, .transfer-checks li { margin: .35rem 0; }
 .calendar-link { font-size: .82rem; text-decoration: underline; padding: .2rem .15rem; min-height: 2.75rem; border: 0; background: transparent; color: var(--accent); }
 .recurring-list { margin-bottom: 1.25rem; }
+.section-heading { display: flex; justify-content: space-between; align-items: baseline; gap: .7rem; }
+#recurring-items { display: flex; gap: .65rem; overflow-x: auto; scroll-snap-type: x mandatory; padding-block: .2rem .35rem; }
+.recurring-trip { flex: 0 0 min(87%, 20rem); scroll-snap-align: start; margin-bottom: 0; color: var(--ink); text-decoration: none; }
+.recurring-trip > span, .saved-overview > span, .managed-favorite small { display: block; margin-top: .3rem; font-size: .85rem; }
+.saved-overview { display: block; color: var(--ink); text-decoration: none; margin-bottom: .6rem; }
+.saved-overview:hover, .recurring-trip:hover { border-color: var(--accent); }
+.journey-menu { position: relative; }
+.journey-menu > summary { list-style: none; cursor: pointer; }
+.journey-menu > summary::-webkit-details-marker { display: none; }
+.journey-menu > div { position: absolute; z-index: 5; right: 0; padding: .3rem; }
+.journey-menu button { white-space: nowrap; }
+.static-journey > summary { display: block; list-style: none; pointer-events: none; }
+.static-journey > summary::-webkit-details-marker { display: none; }
+.map-icon-button { vertical-align: middle; display: inline-grid; place-items: center; width: 2.75rem; margin: .15rem .35rem; padding: .25rem; }
+.map-icon-button svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.managed-favorite + .managed-favorite { border-top: 1px solid var(--line); padding-top: .65rem; margin-top: .65rem; }
+.managed-favorite .trip-actions { margin-top: .35rem; }
+.favorite-search-results { list-style: none; padding: 0; margin: .45rem 0 0; }
+.favorite-search-results button { width: 100%; margin-top: .25rem; text-align: left; }
 .recurring-trip > summary { cursor: pointer; }
 .recurring-trip > summary span { display: block; font-size: .84rem; margin: .25rem 0 0 1rem; }
 .recurring-trip > p:empty, #recurring-status:empty { display: none; }

@@ -231,16 +231,20 @@ let currentView;
 function showView() {
   const hash = location.hash;
   const view = hash === '#verbindungen' && resultsReady ? 'results' : hash === '#settings' ? 'settings'
-    : hash === '#saved-trips' || hash.startsWith('#fahrt-') ? 'saved-trips' : 'search-view';
+    : hash === '#favoriten' ? 'favorites-view' : hash.startsWith('#fahrt-') || hash.startsWith('#wiederholung-') ? 'journey-view'
+    : hash === '#saved-trips' ? 'saved-trips' : 'search-view';
   if (view === currentView) return;
   currentView = view;
   document.body.dataset.view = view;
   byId('results').hidden = view !== 'results';
-  byId('app-header').hidden = view === 'results';
+  byId('journey-view').hidden = view !== 'journey-view';
+  byId('favorites-view').hidden = view !== 'favorites-view';
+  byId('app-header').hidden = ['results', 'journey-view', 'favorites-view'].includes(view);
   for (const tab of tabs) {
     const selected = tab.dataset.view === view;
     byId(tab.dataset.view).hidden = !selected;
-    if (selected || (view === 'results' && tab.dataset.view === 'search-view')) tab.setAttribute('aria-current', 'page');
+    if (selected || (['results', 'favorites-view'].includes(view) && tab.dataset.view === 'search-view') ||
+        (view === 'journey-view' && tab.dataset.view === 'saved-trips')) tab.setAttribute('aria-current', 'page');
     else tab.removeAttribute('aria-current');
   }
   window.scrollTo(0, 0);
@@ -273,21 +277,42 @@ function toggleFavorite(favorite) {
     ? favorites.filter(({ key }) => key !== favorite.key)
     : [...favorites, favorite];
   try {
-    localStorage.setItem(storageKey, JSON.stringify(next));
+    writeFavorites(next);
   } catch {
     setStatus('form-status', 'Der Browser konnte den Favoriten nicht speichern.');
     return;
   }
-  favorites = next;
   setStatus('form-status', '');
+}
+
+function writeFavorites(next) {
+  localStorage.setItem(storageKey, JSON.stringify(next));
+  favorites = next;
   renderFavorites();
 }
 
+function renameDialog(name, save) {
+  const dialog = byId('rename-dialog');
+  byId('rename-value').value = name || '';
+  setStatus('rename-status', '');
+  byId('rename-form').onsubmit = (event) => {
+    event.preventDefault();
+    try {
+      save(byId('rename-value').value.trim());
+      dialog.close();
+    } catch {
+      setStatus('rename-status', 'Der Name konnte nicht gespeichert werden.');
+    }
+  };
+  dialog.showModal();
+}
+
+byId('cancel-rename').onclick = () => byId('rename-dialog').close();
+
 function renderFavorites() {
-  byId('favorites').hidden = !favorites.length;
   byId('favorite-items').replaceChildren(...favorites.map((favorite) => {
     const { from, to, place } = favorite;
-    const label = place?.name || `${from.name} → ${to.name}`;
+    const label = favorite.label || place?.name || `${from.name} → ${to.name}`;
     const row = element('div', null, 'favorite-row');
     const open = element('button', label);
     open.type = 'button';
@@ -305,8 +330,63 @@ function renderFavorites() {
     row.append(open, remove);
     return row;
   }));
+  const manager = byId('favorite-manager');
+  manager.replaceChildren(...favorites.map((favorite) => {
+    const title = favorite.place?.name || `${favorite.from.name} → ${favorite.to.name}`;
+    const row = element('div', null, 'managed-favorite');
+    const buttons = element('div', null, 'trip-actions');
+    const rename = element('button', 'Umbenennen');
+    const remove = element('button', 'Entfernen');
+    rename.type = remove.type = 'button';
+    rename.onclick = () => renameDialog(favorite.label, (label) =>
+      writeFavorites(favorites.map((item) => item.key === favorite.key ? { ...item, label } : item)));
+    remove.onclick = () => toggleFavorite(favorite);
+    buttons.append(rename, remove);
+    row.append(element('strong', favorite.label || title));
+    if (favorite.label) row.append(element('small', title, 'muted'));
+    row.append(buttons);
+    return row;
+  }));
+  manager.hidden = !favorites.length;
   refreshFavoriteButtons();
 }
+
+byId('add-favorite').onsubmit = async (event) => {
+  event.preventDefault();
+  const list = byId('favorite-search-results');
+  const submit = event.submitter;
+  if (submit) submit.disabled = true;
+  setStatus('favorite-search-status', 'Haltestellen werden gesucht …');
+  list.replaceChildren();
+  try {
+    const matches = (await getJson('/api/stations', { q: byId('favorite-search').value })).filter((p) => p.type === 'STOP');
+    for (const place of matches) {
+      const row = element('li');
+      const button = element('button', place.name);
+      button.type = 'button';
+      const added = () => favorites.some(({ key }) => key === place.id);
+      button.disabled = added();
+      button.onclick = () => {
+        if (!added()) {
+          try {
+            writeFavorites([...favorites, { key: place.id, place }]);
+            button.disabled = true;
+            setStatus('favorite-search-status', `${place.name} hinzugefügt.`);
+          } catch {
+            setStatus('favorite-search-status', 'Der Favorit konnte nicht gespeichert werden.');
+          }
+        }
+      };
+      row.append(button);
+      list.append(row);
+    }
+    setStatus('favorite-search-status', matches.length ? '' : 'Keine Haltestellen gefunden.');
+  } catch (error) {
+    setStatus('favorite-search-status', error.message);
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+};
 
 for (const field of ['from', 'to']) {
   const input = byId(field);
@@ -319,10 +399,11 @@ for (const field of ['from', 'to']) {
   function showPlaces(matches, isFavorite = false) {
     options.replaceChildren(...matches.map((place) => {
       const item = element('li');
-      const button = element('button', place.name);
+      const favorite = isFavorite && favorites.find(({ key }) => key === place.id);
+      const button = element('button', favorite?.label || place.name);
       button.type = 'button';
       const category = isFavorite ? 'Favorit' : place.type === 'STOP' ? 'Haltestelle' : 'Ort';
-      button.append(element('small', [category, place.area].filter(Boolean).join(' · ')));
+      button.append(element('small', [category, favorite?.label && place.name, place.area].filter(Boolean).join(' · ')));
       button.onclick = () => {
         input.focus();
         choose(field, place);
@@ -569,6 +650,22 @@ function walkingIcon() {
   return svg;
 }
 
+function mapControl(label, action) {
+  const button = element('button', null, 'map-icon-button');
+  button.type = 'button';
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(svg.namespaceURI, 'path');
+  path.setAttribute('d', 'm3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3zm6-3v15m6-12v15');
+  svg.append(path);
+  button.append(svg);
+  button.onclick = action;
+  return button;
+}
+
 function renderTimeline(journey) {
   const bar = element('div', null, 'trip-timeline');
   const legend = [];
@@ -683,17 +780,12 @@ function renderJourney(journey, { from, to, best = false, saved = false, recurri
   );
   if (cancelled) summary.append(element('span', 'Verbindung fällt aus', 'result-cancelled'));
   else if (journey.legs.some((leg) => legAlerts(leg).length)) summary.append(element('span', 'Fahrtmeldungen', 'trip-meta problem'));
-  const mapButton = element('button', 'Route auf der Karte', 'map-link');
-  mapButton.type = 'button';
-  mapButton.onclick = () => void openRouteMap(journey);
+  const mapButton = mapControl('Route auf der Karte', () => void openRouteMap(journey));
   const steps = element('ol', null, 'legs');
   steps.append(...journey.legs.map((leg, index) => {
     const row = renderLeg(leg);
     if (leg.mode === 'WALK') {
-      const button = element('button', 'Fußweg auf der Karte', 'map-link');
-      button.type = 'button';
-      button.onclick = () => void openRouteMap(journey, index);
-      row.append(button);
+      row.querySelector('h3').append(mapControl('Fußweg auf der Karte', () => void openRouteMap(journey, index)));
     }
     return row;
   }));
@@ -779,11 +871,13 @@ async function startTripPush(trip) {
 }
 
 async function setupPush() {
+  if (window.isSecureContext && 'serviceWorker' in navigator) {
+    await navigator.serviceWorker.register('/sw.js');
+  }
   const response = await fetch('/api/push');
   pushSetup = await response.json();
   if (window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window &&
       (pushSetup.enabled || pushSetup.testEnabled)) {
-    await navigator.serviceWorker.register('/sw.js');
     serviceWorker = await navigator.serviceWorker.ready;
   }
   if (pushSetup.testEnabled) {
@@ -821,104 +915,135 @@ byId('send-push-test').onclick = async () => {
   }
 };
 
+function nativeSnapshot(trip) {
+  const leg = trip.journey.legs.find((item) => item.mode !== 'WALK') || trip.journey.legs[0];
+  return {
+    id: trip.key, origin: trip.from.name, destination: trip.to.name,
+    departure: Date.parse(trip.journey.startTime) / 1000, arrival: Date.parse(trip.journey.endTime) / 1000,
+    line: leg ? lineName(leg) : '', platform: leg?.from.track || leg?.from.scheduledTrack || '',
+    status: isCancelled(trip.journey) ? 'Fällt aus' : `Stand ${timeLabel(trip.updated)}`,
+  };
+}
+
+function syncNativeTrips() {
+  window.webkit?.messageHandlers?.navigatorTrips?.postMessage({
+    action: 'sync', trips: savedTrips.filter((trip) => Date.parse(trip.journey.endTime) > Date.now())
+      .sort((a, b) => Date.parse(a.journey.startTime) - Date.parse(b.journey.startTime)).slice(0, 8).map(nativeSnapshot),
+  });
+}
+
 function renderSavedTrips() {
   byId('saved-empty').hidden = Boolean(savedTrips.length);
   byId('saved-items').replaceChildren(...[...savedTrips].sort((a, b) =>
     Date.parse(a.journey.startTime) - Date.parse(b.journey.startTime)
   ).map((trip) => {
-    const card = element('article', null, 'saved-trip');
-    card.id = `fahrt-${trip.key}`;
-    const heading = element('h3', `${trip.from.name} → ${trip.to.name}`);
-    const stamp = element('p', `${calendar.format(new Date(trip.journey.startTime))} · Datenstand ${timeLabel(trip.updated)}`, 'muted');
-    const details = renderJourney(trip.journey, { ...trip, saved: true });
-    const actions = element('div', null, 'trip-actions');
-    const refresh = element('button', 'Live aktualisieren');
-    const remove = element('button', 'Entfernen');
-    refresh.type = remove.type = 'button';
-    refresh.className = 'refresh-trip';
-    const status = element('p', null, 'field-status');
-    status.setAttribute('role', 'status');
-    refresh.onclick = async () => {
-      refresh.disabled = true;
-      status.textContent = 'Aktualisiere …';
-      try {
-        const journey = await getJson('/api/refresh', { id: trip.journey.id });
-        if (!Array.isArray(journey.legs)) throw new Error('Der Fahrplandienst hat keine Fahrtdetails geliefert.');
-        if (savedTrips.some(({ key }) => key === trip.key) && writeTrips(savedTrips.map((item) =>
-          item.key === trip.key ? { ...item, journey, updated: Date.now() } : item
-        ))) {
-          const updated = byId(card.id);
-          updated.querySelector('.journey').open = true;
-          updated.querySelector('button').focus({ preventScroll: true });
-          setStatus('saved-status', 'Fahrt aktualisiert.');
-        }
-      } catch (error) {
-        status.textContent = `${error.message} Der gespeicherte Stand ist weiter verfügbar.`;
-      } finally {
-        refresh.disabled = false;
-      }
-    };
-    remove.onclick = async () => {
-      remove.disabled = true;
-      try {
-        if (trip.watchId) await pushRequest('DELETE', trip.watchId);
-        if (writeTrips(savedTrips.filter(({ key }) => key !== trip.key))) {
-          document.querySelectorAll('#journeys .save-trip').forEach((button) => {
-            if (button.dataset.tripId === (trip.originalId || trip.journey.id)) {
-              button.disabled = false;
-              button.textContent = '☆ Fahrt merken';
-            }
-          });
-        }
-      } catch (error) {
-        status.textContent = error.message;
-      } finally {
-        remove.disabled = false;
-      }
-    };
-    actions.append(refresh);
-    if ((serviceWorker && pushSetup.enabled) || trip.watchId) {
-      const push = element('button', trip.watchId ? 'Push deaktivieren' : 'Push aktivieren');
-      push.type = 'button';
-      push.disabled = !trip.watchId && Date.parse(trip.journey.endTime) <= Date.now();
-      push.onclick = async () => {
-        push.disabled = remove.disabled = true;
-        try {
-          if (trip.watchId) {
-            await pushRequest('DELETE', trip.watchId);
-            writeTrips(savedTrips.map((item) => item.key === trip.key ? { ...item, watchId: null } : item));
-          } else {
-            await startTripPush(trip);
-          }
-        } catch (error) {
-          status.textContent = error.name === 'NotAllowedError'
-            ? 'Erlaube Mitteilungen in den iPhone-Einstellungen für diese Web-App.' : error.message;
-        } finally {
-          push.disabled = remove.disabled = false;
-        }
-      };
-      actions.append(push);
-    } else if (pushSetup?.enabled) {
-      status.textContent = 'Für iPhone-Push öffne die App vom Home-Bildschirm.';
-    }
-    actions.append(remove);
-    const calendarLink = element('button', 'In Kalender übernehmen', 'calendar-link');
-    calendarLink.type = 'button';
-    calendarLink.onclick = () => {
-      const url = new URL(`/#fahrt-${trip.key}`, location.origin).href;
-      const data = calendarFile(trip, trip.journey.legs.map((leg) =>
-        `${timeLabel(leg.startTime)} ${leg.from.name} → ${timeLabel(leg.endTime)} ${leg.to.name} · ${lineName(leg)}`), url);
-      const file = URL.createObjectURL(new Blob([data], { type: 'text/calendar;charset=utf-8' }));
-      const link = element('a');
-      link.href = file;
-      link.download = 'Privatnavigator-Fahrt.ics';
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(file), 1000);
-    };
-    actions.append(calendarLink);
-    card.append(heading, stamp, details, actions, status);
-    return card;
+    const link = element('a', null, 'panel saved-overview');
+    link.href = '#fahrt-' + trip.key;
+    link.append(element('strong', trip.from.name + ' → ' + trip.to.name),
+      element('span', calendar.format(new Date(trip.journey.startTime)) + ' · ' + timeLabel(trip.journey.startTime), 'muted'));
+    return link;
   }));
+  syncNativeTrips();
+}
+
+function renderSavedTrip(trip) {
+  const card = element('article', null, 'saved-trip');
+  const heading = element('h3', `${trip.from.name} → ${trip.to.name}`);
+  const stamp = element('p', `${calendar.format(new Date(trip.journey.startTime))} · Datenstand ${timeLabel(trip.updated)}`, 'muted');
+  const details = renderJourney(trip.journey, { ...trip, saved: true });
+  details.open = true;
+  details.classList.add('static-journey');
+  const actions = element('div', null, 'trip-actions');
+  const refresh = element('button', 'Live aktualisieren');
+  const remove = element('button', 'Entfernen');
+  refresh.type = remove.type = 'button';
+  refresh.className = 'refresh-trip';
+  const status = element('p', null, 'field-status');
+  status.setAttribute('role', 'status');
+  refresh.onclick = async () => {
+    refresh.disabled = true;
+    status.textContent = 'Aktualisiere …';
+    try {
+      const journey = await getJson('/api/refresh', { id: trip.journey.id });
+      if (!Array.isArray(journey.legs)) throw new Error('Der Fahrplandienst hat keine Fahrtdetails geliefert.');
+      if (savedTrips.some(({ key }) => key === trip.key) && writeTrips(savedTrips.map((item) =>
+        item.key === trip.key ? { ...item, journey, updated: Date.now() } : item
+      ))) {
+        openTripLink();
+      }
+    } catch (error) {
+      status.textContent = `${error.message} Der gespeicherte Stand ist weiter verfügbar.`;
+    } finally {
+      refresh.disabled = false;
+    }
+  };
+  remove.onclick = async () => {
+    remove.disabled = true;
+    try {
+      if (trip.watchId) await pushRequest('DELETE', trip.watchId);
+      if (writeTrips(savedTrips.filter(({ key }) => key !== trip.key))) {
+        location.hash = '#saved-trips';
+      document.querySelectorAll('#journeys .save-trip').forEach((button) => {
+          if (button.dataset.tripId === (trip.originalId || trip.journey.id)) {
+            button.disabled = false;
+            button.textContent = '☆ Fahrt merken';
+          }
+        });
+      }
+    } catch (error) {
+      status.textContent = error.message;
+    } finally {
+      remove.disabled = false;
+    }
+  };
+  actions.append(refresh);
+  if ((serviceWorker && pushSetup.enabled) || trip.watchId) {
+    const push = element('button', trip.watchId ? 'Push deaktivieren' : 'Push aktivieren');
+    push.type = 'button';
+    push.disabled = !trip.watchId && Date.parse(trip.journey.endTime) <= Date.now();
+    push.onclick = async () => {
+      push.disabled = remove.disabled = true;
+      try {
+        if (trip.watchId) {
+          await pushRequest('DELETE', trip.watchId);
+          writeTrips(savedTrips.map((item) => item.key === trip.key ? { ...item, watchId: null } : item));
+        } else {
+          await startTripPush(trip);
+        }
+      } catch (error) {
+        status.textContent = error.name === 'NotAllowedError'
+          ? 'Erlaube Mitteilungen in den iPhone-Einstellungen für diese Web-App.' : error.message;
+      } finally {
+        push.disabled = remove.disabled = false;
+      }
+    };
+    actions.append(push);
+  } else if (pushSetup?.enabled) {
+    status.textContent = 'Für iPhone-Push öffne die App vom Home-Bildschirm.';
+  }
+  actions.append(remove);
+  const calendarLink = element('button', 'In Kalender übernehmen', 'calendar-link');
+  calendarLink.type = 'button';
+  calendarLink.onclick = () => {
+    const url = new URL(`/#fahrt-${trip.key}`, location.origin).href;
+    const data = calendarFile(trip, trip.journey.legs.map((leg) =>
+      `${timeLabel(leg.startTime)} ${leg.from.name} → ${timeLabel(leg.endTime)} ${leg.to.name} · ${lineName(leg)}`), url);
+    const file = URL.createObjectURL(new Blob([data], { type: 'text/calendar;charset=utf-8' }));
+    const link = element('a');
+    link.href = file;
+    link.download = 'Privatnavigator-Fahrt.ics';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(file), 1000);
+  };
+  actions.append(calendarLink);
+  if (window.webkit?.messageHandlers?.navigatorTrips && Date.parse(trip.journey.endTime) > Date.now()) {
+    const activity = element('button', 'Live-Aktivität planen', 'calendar-link');
+    activity.type = 'button';
+    activity.onclick = () => window.webkit.messageHandlers.navigatorTrips.postMessage({ action: 'activity', trip: nativeSnapshot(trip) });
+    actions.append(activity);
+  }
+  card.append(heading, stamp, details, actions, status);
+  return card;
 }
 
 renderSavedTrips();
@@ -977,20 +1102,48 @@ byId('import-file').onchange = async (event) => {
   }
 };
 
+let pushUpdateHandled;
+
 function openTripLink() {
   showView();
-  if (!/^#fahrt-[a-f0-9]{24}$/.test(location.hash)) return;
-  const card = byId(location.hash.slice(1));
-  if (!card) {
-    setStatus('saved-status', 'Diese Fahrt ist in diesem Browser nicht gespeichert.');
+  if (currentView !== 'journey-view') return;
+  const content = byId('journey-view-body');
+  const title = byId('journey-view-title');
+  const menu = byId('journey-menu');
+  menu.hidden = true;
+  menu.open = false;
+  byId('offline-journey').hidden = navigator.onLine;
+  const wrapper = element('div');
+  content.replaceChildren(wrapper);
+  if (location.hash.startsWith('#wiederholung-')) {
+    let rule;
+    try { rule = recurringTrips.find(decodeURIComponent(location.hash.slice('#wiederholung-'.length))); } catch {}
+    title.textContent = rule?.label || 'Wiederholende Reise';
+    if (!rule) return wrapper.append(element('p', 'Diese Wiederholung ist auf diesem Gerät nicht gespeichert.'));
+    menu.hidden = false;
+    byId('rename-recurring').onclick = () => renameDialog(rule.label, (label) => {
+      recurringTrips.rename(rule.key, label);
+      openTripLink();
+    });
+    void recurringTrips.openDetail(rule, wrapper);
     return;
   }
-  card.querySelector('.journey').open = true;
-  card.scrollIntoView();
-  card.querySelector('.refresh-trip').click();
+  title.textContent = 'Fahrt';
+  const trip = savedTrips.find(({ key }) => location.hash === `#fahrt-${key}`);
+  if (!trip) return wrapper.append(element('p', 'Diese Fahrt ist auf diesem Gerät nicht gespeichert.'));
+  const card = renderSavedTrip(trip);
+  wrapper.append(card);
+  const update = new URLSearchParams(location.search).get('update');
+  if (navigator.onLine && update && update !== pushUpdateHandled) {
+    pushUpdateHandled = update;
+    card.querySelector('.refresh-trip').click();
+  }
 }
 
 window.addEventListener('hashchange', openTripLink);
+for (const event of ['online', 'offline']) window.addEventListener(event, () => {
+  byId('offline-journey').hidden = navigator.onLine;
+});
 openTripLink();
 
 const paging = { earlier: byId('earlier-trips'), later: byId('later-trips') };

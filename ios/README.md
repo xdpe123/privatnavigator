@@ -1,0 +1,7 @@
+# Privatnavigator für iOS
+
+Der native SwiftUI-Container zeigt die Web-App und übernimmt die bevorstehenden gemerkten Fahrten aus diesem iOS-App-Container in eine lokale App Group. Das Home-Screen-Widget zeigt die nächste Fahrt. In den Fahrtdetails innerhalb des nativen Containers lässt sich eine Live-Aktivität starten. Das Widget und die Live-Aktivität öffnen beim Antippen die zugehörigen Fahrtdetails.
+
+Für den Terminstart eine Stunde vor Abfahrt ist iOS 26 erforderlich. Auf iOS 17 bis 18 kann die Aktivität innerhalb dieser Stunde geöffnet werden. Die Aktivität zeigt den letzten im nativen Container geladenen Stand. Für Updates bei geschlossener App braucht es zusätzlich eine serverseitige ActivityKit-APNs-Anbindung mit Apple-Signierung, die in diesem Entwurf noch fehlt. Die Swift-Ziele wurden auf Windows vorbereitet und müssen auf einem Mac gebaut und auf einem iPhone geprüft werden.
+
+Auf einem Mac mit Xcode 26 und installiertem XcodeGen in diesem Verzeichnis `xcodegen generate` ausführen. Dann `Privatnavigator.xcodeproj` öffnen, das Apple-Team in beiden Targets auswählen und bei Bedarf eigene Bundle-IDs und dieselbe App Group in beiden Entitlements sowie in `Shared/TripSnapshot.swift` eintragen. Beide Targets gemeinsam auf dem iPhone installieren. Die Web-App im nativen Container anmelden. Lokale Fahrten aus der bisherigen Home-Screen-Web-App lassen sich mit der bestehenden Export- und Importfunktion übertragen.
