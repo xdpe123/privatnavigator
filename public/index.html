@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f4f6">
+  <title>Privatnavigator</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header><div class="wrap"><a class="brand" href="/">Privatnavigator</a><nav aria-label="Bereiche"><a href="#planner">Suche</a><a href="#saved-trips">Meine Fahrten</a></nav></div></header>
+  <main class="wrap">
+    <h1>Verbindung suchen</h1>
+    <form id="planner" class="panel">
+      <div class="route">
+        <div class="place">
+          <label for="from">Start</label>
+          <div class="field"><input id="from" type="search" placeholder="Haltestelle oder Adresse" autocomplete="off" required aria-controls="from-options"><button type="button" class="star" id="from-star" aria-label="Start als Favorit speichern" disabled>☆</button></div>
+          <ul id="from-options" class="options" aria-label="Startvorschläge" hidden></ul>
+          <p id="from-status" class="field-status" role="status" hidden></p>
+          <button id="from-location" class="use-location" type="button">Meinen Standort nutzen</button>
+        </div>
+        <button id="reverse" class="swap" type="button" aria-label="Start und Ziel tauschen" title="Start und Ziel tauschen">⇄</button>
+        <div class="place">
+          <label for="to">Ziel</label>
+          <div class="field"><input id="to" type="search" placeholder="Haltestelle oder Adresse" autocomplete="off" required aria-controls="to-options"><button type="button" class="star" id="to-star" aria-label="Ziel als Favorit speichern" disabled>☆</button></div>
+          <ul id="to-options" class="options" aria-label="Zielvorschläge" hidden></ul>
+          <p id="to-status" class="field-status" role="status" hidden></p>
+          <button id="to-location" class="use-location" type="button">Meinen Standort nutzen</button>
+        </div>
+      </div>
+      <div class="when">
+        <label>Suchzeit<select id="direction"><option value="false">Abfahrt</option><option value="true">Ankunft</option></select></label>
+        <label>Datum und Uhrzeit<input id="time" type="datetime-local" required></label>
+        <button type="button" id="now">Jetzt</button>
+      </div>
+      <div class="actions">
+        <button class="primary" id="submit">Verbindungen finden</button>
+        <button type="button" id="save-route" disabled>☆ Strecke speichern</button>
+      </div>
+      <p id="form-status" role="status" hidden></p>
+    </form>
+    <section id="favorites" class="panel" hidden aria-labelledby="favorites-title">
+      <h2 id="favorites-title">Favoriten</h2>
+      <div id="favorite-items" class="favorite-items"></div>
+    </section>
+    <section id="results" aria-labelledby="results-title" hidden>
+      <h2 id="results-title">Verbindungen</h2>
+      <p id="result-status" role="status"></p>
+      <div id="journeys"></div>
+    </section>
+    <section id="saved-trips" aria-labelledby="saved-title">
+      <h2 id="saved-title">Meine Fahrten</h2>
+      <p id="saved-empty" class="muted">Gespeicherte Einzelverbindungen findest du hier.</p>
+      <p id="saved-status" role="status" hidden></p>
+      <div id="saved-items"></div>
+      <details class="transfer">
+        <summary>Favoriten und Fahrten übertragen</summary>
+        <div class="trip-actions">
+          <button id="export-data" type="button">Datei speichern</button>
+          <button id="import-data" type="button">Datei einlesen</button>
+          <input id="import-file" type="file" accept=".json,application/json" hidden>
+        </div>
+        <p id="transfer-status" role="status" hidden></p>
+      </details>
+    </section>
+  </main>
+  <footer class="wrap">Fahrplandaten von <a href="https://transitous.org/sources/">Transitous</a> · Kartendaten von <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap-Mitwirkenden</a></footer>
+</body>
+</html>
