@@ -58,6 +58,8 @@ button:disabled { opacity: .55; cursor: default; }
 .when input, .when select { display: block; max-width: 100%; margin-top: .35rem; }
 .primary { background: var(--accent); color: white; border-color: var(--accent); }
 .primary:hover:not(:disabled) { background: #a00016; }
+.settings-icon { display: inline-grid; place-items: center; width: 2.85rem; padding: .3rem; }
+.trip-page { width: 100%; margin-bottom: .9rem; }
 .options {
   position: absolute;
   z-index: 2;

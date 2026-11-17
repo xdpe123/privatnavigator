@@ -43,15 +43,20 @@ export function createTransitClient(contact, beforeRequest = () => {}) {
       }));
   }
 
-  async function journeys(from, to, time, arriveBy, groups, ticket) {
+  async function journeys(from, to, time, arriveBy, groups, ticket, cursor) {
     const upstream = new URL('https://api.transitous.org/api/v6/plan');
     upstream.search = new URLSearchParams({
       fromPlace: from, toPlace: to, time, arriveBy, numItineraries: groups ? '12' : '5',
       detailedLegs: 'false', language: 'de',
     });
     if (groups) upstream.searchParams.set('transitModes', routingModes(groups).join(','));
+    if (cursor) upstream.searchParams.set('pageCursor', cursor);
     const plan = await lookup(upstream, 30_000);
-    return groups ? plan.itineraries.filter((trip) => matchesFilters(trip, groups, ticket)).slice(0, 5) : plan.itineraries;
+    return {
+      itineraries: groups ? plan.itineraries.filter((trip) => matchesFilters(trip, groups, ticket)) : plan.itineraries,
+      earlier: plan.previousPageCursor || null,
+      later: plan.nextPageCursor || null,
+    };
   }
 
   function refreshJourney(itineraryId) {

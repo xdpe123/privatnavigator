@@ -14,8 +14,9 @@ export async function transitApi(request, url, client, json) {
     const to = params.get('to');
     const time = params.get('time');
     const arriveBy = params.get('arriveBy');
+    const cursor = params.get('cursor');
     if (!from || !to || from === to || from.length > 250 || to.length > 250 ||
-        !time || !Number.isFinite(Date.parse(time)) || !['true', 'false'].includes(arriveBy)) {
+        !time || !Number.isFinite(Date.parse(time)) || !['true', 'false'].includes(arriveBy) || cursor?.length > 1000) {
       return json(400, { error: 'Bitte Start, Ziel und Zeitpunkt prüfen.' });
     }
     const ticket = params.get('ticket') === 'true';
@@ -25,7 +26,8 @@ export async function transitApi(request, url, client, json) {
     }
     const groups = ticket ? ticketGroups.filter((group) => !requested || requested.includes(group)) : requested;
     if (groups && !groups.length) return json(400, { error: 'Bitte mindestens ein passendes Verkehrsmittel auswählen.' });
-    return json(200, await journeys(from, to, time, arriveBy, groups, ticket));
+    const page = await journeys(from, to, time, arriveBy, groups, ticket, cursor);
+    return json(200, params.get('paged') === 'true' ? page : page.itineraries.slice(0, 5));
   }
   if (url.pathname === '/api/refresh') {
     const itineraryId = params.get('id');

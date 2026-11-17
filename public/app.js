@@ -16,6 +16,8 @@ const liveLocation = { id: 'live-location', name: 'Mein Standort', type: 'LOCATI
 let favorites = [];
 let savedTrips = [];
 let activeSearch;
+let tripQuery;
+let tripPage;
 let pushSetup;
 let serviceWorker;
 let filters = { ticket: false, groups: allGroups };
@@ -103,6 +105,7 @@ function choose(field, place) {
 
 function clearResults() {
   activeSearch?.abort();
+  tripQuery = tripPage = null;
   byId('results').hidden = true;
 }
 
@@ -260,8 +263,58 @@ function renderFavorites() {
 for (const field of ['from', 'to']) {
   const input = byId(field);
   const options = byId(`${field}-options`);
+  const picker = input.closest('.place');
   let timer;
   let pending;
+  let suggestionsOpen = false;
+
+  function showPlaces(matches, isFavorite = false) {
+    options.replaceChildren(...matches.map((place) => {
+      const item = element('li');
+      const button = element('button', place.name);
+      button.type = 'button';
+      const category = isFavorite ? 'Favorit' : place.type === 'STOP' ? 'Haltestelle' : 'Ort';
+      button.append(element('small', [category, place.area].filter(Boolean).join(' · ')));
+      button.onclick = () => {
+        input.focus();
+        choose(field, place);
+      };
+      item.append(button);
+      return item;
+    }));
+    options.hidden = !matches.length;
+  }
+
+  function offerFavorites() {
+    if (input.value.trim() && !places[field]) return;
+    suggestionsOpen = true;
+    showPlaces(favorites.flatMap(({ place }) => place?.type === 'STOP' ? [place] : []), true);
+  }
+
+  function closeSuggestions() {
+    suggestionsOpen = false;
+    options.hidden = true;
+  }
+
+  input.addEventListener('focus', offerFavorites);
+  input.addEventListener('click', offerFavorites);
+  picker.addEventListener('focusout', (event) => {
+    if (event.relatedTarget && !picker.contains(event.relatedTarget)) closeSuggestions();
+  });
+  document.addEventListener('pointerdown', (event) => {
+    if (!picker.contains(event.target)) closeSuggestions();
+  });
+  picker.addEventListener('keydown', (event) => {
+    if (options.hidden) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      input.focus();
+      closeSuggestions();
+    } else if (event.key === 'ArrowDown' && event.target === input) {
+      event.preventDefault();
+      options.querySelector('button')?.focus();
+    }
+  });
   input.addEventListener('input', () => {
     clearTimeout(timer);
     pending?.abort();
@@ -272,26 +325,19 @@ for (const field of ['from', 'to']) {
     refreshFavoriteButtons();
     setStatus(`${field}-status`, '');
     const query = input.value.trim();
+    suggestionsOpen = true;
+    if (!query) {
+      offerFavorites();
+      return;
+    }
     if (query.length < 3) return;
     timer = setTimeout(async () => {
       const controller = new AbortController();
       pending = controller;
       try {
         const matches = await getJson('/api/stations', { q: query }, controller.signal);
-        if (controller.signal.aborted || input.value.trim() !== query || places[field]) return;
-        options.replaceChildren(...matches.map((place) => {
-          const item = element('li');
-          const button = element('button', place.name);
-          button.type = 'button';
-          button.append(element('small', [place.type === 'STOP' ? 'Haltestelle' : 'Ort', place.area].filter(Boolean).join(' · ')));
-          button.onclick = () => {
-            choose(field, place);
-            input.focus();
-          };
-          item.append(button);
-          return item;
-        }));
-        options.hidden = !matches.length;
+        if (controller.signal.aborted || !suggestionsOpen || input.value.trim() !== query || places[field]) return;
+        showPlaces(matches);
         if (!matches.length) setStatus(`${field}-status`, 'Keine passenden Orte gefunden.');
       } catch (error) {
         if (!controller.signal.aborted && input.value.trim() === query && !places[field]) {
@@ -306,7 +352,7 @@ for (const field of ['from', 'to']) {
     const initial = input.value;
     const initialPlace = places[field];
     locate.disabled = true;
-    options.hidden = true;
+    closeSuggestions();
     setStatus(`${field}-status`, 'Standort wird ermittelt …');
     try {
       await currentLocation();
@@ -691,6 +737,51 @@ function openTripLink() {
 window.addEventListener('hashchange', openTripLink);
 openTripLink();
 
+const paging = { earlier: byId('earlier-trips'), later: byId('later-trips') };
+
+function updatePaging(busy = false) {
+  for (const [direction, button] of Object.entries(paging)) {
+    button.hidden = !tripPage?.[direction];
+    button.disabled = busy;
+  }
+}
+
+async function showTripPage(query, controller, direction) {
+  const cursor = direction && tripPage?.[direction];
+  updatePaging(true);
+  if (direction) setStatus('result-status', 'Weitere Verbindungen werden geladen …');
+  try {
+    const page = await getJson('/api/journeys', {
+      ...query.params, paged: 'true', ...(cursor ? { cursor } : {}),
+    }, controller.signal);
+    if (controller.signal.aborted) return;
+    if (cursor && page[direction] === cursor) page[direction] = null;
+    tripPage = page;
+    const { itineraries } = page;
+    itineraries.sort((a, b) => (query.params.arriveBy ? Date.parse(b.startTime) - Date.parse(a.startTime)
+      : Date.parse(a.endTime) - Date.parse(b.endTime)) || a.transfers - b.transfers || a.duration - b.duration);
+    byId('journeys').replaceChildren(...itineraries.map((journey, index) =>
+      renderJourney(journey, { from: query.from, to: query.to, best: index === 0 })
+    ));
+    setStatus('result-status', itineraries.length ? '' : 'Keine Verbindungen im Suchzeitraum gefunden.');
+    if (direction) byId('results-title').focus();
+  } catch (error) {
+    if (!controller.signal.aborted) setStatus('result-status', error.message);
+  } finally {
+    if (!controller.signal.aborted) updatePaging();
+  }
+}
+
+for (const [direction, button] of Object.entries(paging)) {
+  button.onclick = () => {
+    if (tripQuery && tripPage?.[direction]) {
+      activeSearch?.abort();
+      activeSearch = new AbortController();
+      void showTripPage(tripQuery, activeSearch, direction);
+    }
+  };
+}
+
 byId('planner').addEventListener('submit', async (event) => {
   event.preventDefault();
   for (const field of ['from', 'to']) {
@@ -707,10 +798,11 @@ byId('planner').addEventListener('submit', async (event) => {
   activeSearch?.abort();
   const controller = new AbortController();
   activeSearch = controller;
+  tripQuery = tripPage = null;
+  updatePaging();
   setStatus('form-status', '');
   byId('results').hidden = false;
-  const content = byId('journeys');
-  content.replaceChildren();
+  byId('journeys').replaceChildren();
   setStatus('result-status', `Suche ${places.from.name} → ${places.to.name} …`);
   try {
     let { from, to } = places;
@@ -721,21 +813,16 @@ byId('planner').addEventListener('submit', async (event) => {
       if (to.type === 'LOCATION') to = position;
     }
     const arriveBy = byId('direction').value === 'true';
-    const journeys = await getJson('/api/journeys', {
+    const params = {
       from: from.id,
       to: to.id,
       time: new Date(byId('time').value).toISOString(),
       arriveBy,
       ...(filters.ticket ? { ticket: 'true' } : {}),
       ...(filters.groups.length < allGroups.length ? { modes: filters.groups.join(',') } : {}),
-    }, controller.signal);
-    if (controller.signal.aborted) return;
-    journeys.sort((a, b) => (arriveBy ? Date.parse(b.startTime) - Date.parse(a.startTime)
-      : Date.parse(a.endTime) - Date.parse(b.endTime)) || a.transfers - b.transfers || a.duration - b.duration);
-    content.replaceChildren(...journeys.map((journey, index) =>
-      renderJourney(journey, { from, to, best: index === 0 })
-    ));
-    setStatus('result-status', journeys.length ? '' : 'Keine Verbindungen im Suchzeitraum gefunden.');
+    };
+    tripQuery = { from, to, params };
+    await showTripPage(tripQuery, controller);
   } catch (error) {
     if (!controller.signal.aborted) setStatus('result-status', error.message);
   }
