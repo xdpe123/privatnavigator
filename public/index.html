@@ -104,6 +104,12 @@
     </section>
     <section id="saved-trips" aria-labelledby="saved-title" hidden>
       <h1 id="saved-title">Meine Fahrten</h1>
+      <section class="recurring-list" aria-labelledby="recurring-title">
+        <h2 id="recurring-title">Wiederholende Reisen</h2>
+        <p id="recurring-empty" class="muted">Wähle in einer Fahrt „Wiederholen“, um sie hier einzurichten.</p>
+        <div id="recurring-items"></div>
+      </section>
+      <h2>Einzeln gemerkt</h2>
       <p id="saved-empty" class="muted">Gespeicherte Einzelverbindungen findest du hier.</p>
       <p id="saved-status" role="status" hidden></p>
       <div id="saved-items"></div>
@@ -194,6 +200,22 @@
     </div>
     <div id="map-walks" class="map-walks"></div>
     <p id="map-location-status" role="status" hidden></p>
+  </dialog>
+  <dialog id="recurring-dialog" aria-labelledby="recurring-dialog-title">
+    <form id="recurring-form">
+      <h2 id="recurring-dialog-title" tabindex="-1" autofocus>Fahrt wiederholen</h2>
+      <p id="recurring-route"></p>
+      <label>Abfahrt (deutsche Zeit) <input id="recurring-time" type="time" required></label>
+      <fieldset>
+        <legend>Wochentage</legend>
+        <div id="recurring-days" class="recurring-days"></div>
+      </fieldset>
+      <p id="recurring-status" role="status"></p>
+      <div class="trip-actions">
+        <button class="primary" type="submit">Wiederholung speichern</button>
+        <button id="cancel-recurring" type="button">Abbrechen</button>
+      </div>
+    </form>
   </dialog>
 </body>
 </html>

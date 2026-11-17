@@ -1,6 +1,7 @@
 import { allGroups, modeGroups, ticketGroups } from './search-filters.js';
 import { createRouteMap } from './route-map.js';
-import { alternativeStops, calendarFile, isCancelled, transfersFor, tripTimeline } from './journey-details.js';
+import { alternativeStops, calendarFile, isCancelled, shortestAlternatives, transfersFor, tripTimeline } from './journey-details.js';
+import { setupRecurringTrips } from './recurring-trips.js';
 
 const byId = (id) => document.getElementById(id);
 const clock = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
@@ -244,9 +245,11 @@ function showView() {
   }
   window.scrollTo(0, 0);
   if (view === 'settings') void loadUsage();
+  if (view === 'saved-trips') recurringTrips.render();
 }
 
 const openRouteMap = createRouteMap((id, signal) => getJson('/api/refresh', { id, geometry: 'true' }, signal));
+const recurringTrips = setupRecurringTrips({ getJson, renderJourney, isCancelled });
 
 function currentLocation() {
   return new Promise((resolve, reject) => {
@@ -629,22 +632,24 @@ function renderTransferCheck(journey, from, to, options) {
         const routes = await getJson('/api/journeys', {
           ...options, from: stop.id, to: to.id, time: stop.time, arriveBy: 'false',
         });
-        const best = routes.filter((trip) => {
+        const feasible = routes.filter((trip) => {
           const firstRide = trip.legs.find((leg) => leg.mode !== 'WALK');
           if (stop.earlier && check?.incoming.tripId && firstRide?.tripId === check.incoming.tripId) return false;
           if (!stop.earlier && check?.outgoing.tripId && firstRide?.tripId === check.outgoing.tripId &&
               Date.parse(trip.endTime) === Date.parse(journey.endTime)) return false;
           return !isCancelled(trip) && !transfersFor(trip).some((item) => item.minutes < 0)
             && Date.parse(trip.startTime) >= Date.parse(stop.time);
-        })
-          .sort((a, b) => Date.parse(a.endTime) - Date.parse(b.endTime))[0];
-        return best ? { stop, best } : null;
+        });
+        const earliest = Math.min(Infinity, ...feasible.map((trip) => Date.parse(trip.endTime)));
+        return feasible.filter((trip) => Date.parse(trip.endTime) === earliest).map((best) => ({ stop, best }));
       }));
-      const alternatives = results.flatMap((result) => result.status === 'fulfilled' && result.value ? [result.value] : [])
-        .sort((a, b) => Date.parse(a.best.endTime) - Date.parse(b.best.endTime));
+      const usableOriginal = !isCancelled(journey) && !checks.some((item) => item.minutes < 0);
+      const normalFailed = results.some((result, index) => result.status === 'rejected' && !candidates[index].earlier);
+      const alternatives = shortestAlternatives(results.flatMap((result) =>
+        result.status === 'fulfilled' ? result.value : []).filter(({ stop }) => !normalFailed || !stop.earlier), journey, usableOriginal);
       const failed = results.filter((result) => result.status === 'rejected').length;
-      state.textContent = alternatives.length ? `${alternatives.length} Möglichkeiten nach Ankunft sortiert.${failed ? ' Einzelne Halte konnten nicht geprüft werden.' : ''}`
-        : failed ? 'Die Suche konnte nicht für alle Halte abgeschlossen werden.' : 'Keine passende Alternative an diesen Halten gefunden.';
+      state.textContent = alternatives.length ? `Früheste Ankunft der geprüften Möglichkeiten.${failed ? ' Einzelne Halte konnten nicht geprüft werden.' : ''}`
+        : failed ? 'Die Suche konnte nicht für alle Halte abgeschlossen werden.' : 'Keine lohnende Alternative an diesen Halten gefunden.';
       for (const { stop, best } of alternatives) {
         const gain = Math.floor((Date.parse(journey.endTime) - Date.parse(best.endTime)) / 60000);
         suggestions.append(element('h3', `${stop.earlier ? 'Früher aussteigen' : 'Weiterfahrt'} ab ${stop.name}`));
@@ -659,7 +664,7 @@ function renderTransferCheck(journey, from, to, options) {
   return section;
 }
 
-function renderJourney(journey, { from, to, best = false, saved = false, options = routingOptions(), checkAlternatives = true } = {}) {
+function renderJourney(journey, { from, to, best = false, saved = false, recurring = false, options = routingOptions(), checkAlternatives = true } = {}) {
   const details = element('details', null, 'panel journey');
   const summary = element('summary');
   const duration = Math.round(journey.duration / 60);
@@ -726,6 +731,12 @@ function renderJourney(journey, { from, to, best = false, saved = false, options
       }
     };
     details.append(save);
+  }
+  if (!recurring && from?.id && to?.id) {
+    const repeat = element('button', 'Wiederholen', 'calendar-link recur-link');
+    repeat.type = 'button';
+    repeat.onclick = () => recurringTrips.open(journey, from, to, options);
+    details.append(repeat);
   }
   return details;
 }
@@ -915,7 +926,7 @@ void setupPush().catch(() => {});
 
 byId('export-data').onclick = () => {
   const trips = savedTrips.map(({ watchId, ...trip }) => trip);
-  const data = new Blob([JSON.stringify({ version: 1, favorites, trips })], { type: 'application/json' });
+  const data = new Blob([JSON.stringify({ version: 1, favorites, trips, recurring: recurringTrips.export() })], { type: 'application/json' });
   const url = URL.createObjectURL(data);
   const download = element('a');
   download.href = url;
@@ -959,6 +970,7 @@ byId('import-file').onchange = async (event) => {
     favorites = nextFavorites;
     renderFavorites();
     if (!writeTrips(nextTrips)) throw new Error('Die Fahrten konnten nicht vollständig gespeichert werden.');
+    recurringTrips.import(data.recurring);
     setStatus('transfer-status', 'Daten eingelesen. Mitteilungen kannst du für übertragene Fahrten erneut aktivieren.');
   } catch (error) {
     setStatus('transfer-status', error.message);

@@ -18,6 +18,7 @@ const files = new Map([
   ['/search-filters.js', ['search-filters.js', 'text/javascript']],
   ['/route-map.js', ['route-map.js', 'text/javascript']],
   ['/journey-details.js', ['journey-details.js', 'text/javascript']],
+  ['/recurring-trips.js', ['recurring-trips.js', 'text/javascript']],
   ['/leaflet/leaflet.js', ['leaflet/leaflet.js', 'text/javascript']],
   ['/leaflet/leaflet.css', ['leaflet/leaflet.css', 'text/css']],
   ['/manifest.webmanifest', ['manifest.webmanifest', 'application/manifest+json']],

@@ -63,6 +63,15 @@ export function alternativeStops(journey, from, check, now = Date.now()) {
   }).slice(0, 3);
 }
 
+export function shortestAlternatives(alternatives, journey, usableOriginal) {
+  const arrival = ({ best }) => instant(best.endTime);
+  const atTransfer = Math.min(Infinity, ...alternatives.filter(({ stop }) => !stop.earlier).map(arrival));
+  const baseline = Math.min(atTransfer, usableOriginal ? instant(journey.endTime) || Infinity : Infinity);
+  const eligible = alternatives.filter((item) => !item.stop.earlier || arrival(item) <= baseline - minute);
+  const earliest = Math.min(Infinity, ...eligible.map(arrival));
+  return eligible.filter((item) => arrival(item) === earliest).slice(0, 3);
+}
+
 export function calendarFile(trip, labels, url) {
   const start = new Date(trip.journey.startTime);
   const end = new Date(trip.journey.endTime);
