@@ -5,7 +5,7 @@ import { subscriptionValid } from './push-subscription.js';
 import { createTransitClient } from './transit.js';
 import { transitApi } from './transit-api.js';
 import { evaluateWatch, minute, pendingReminders, snapshot, tripSchedule } from './trip-monitor.js';
-import { apiLimit, budgetError, day, dayKey, historyDays, requestKind, usageReport } from './usage.js';
+import { apiLimit, budgetError, budgetWarning, crossedBudgetThreshold, day, dayKey, historyDays, requestKind, usageReport } from './usage.js';
 import { completedTrip, historyWindow, summarizeTrips } from './punctuality.js';
 import { pushPreview, pushTestTypes } from './push-previews.js';
 import { normalizePushOptions, pushWatchIds } from './public/push-options.js';
@@ -46,10 +46,22 @@ export default {
         const ready = Boolean(configured(env));
         return json(200, {
           enabled: ready && env.PUSH_MONITORING === 'true',
+          budgetAlerts: ready,
           testEnabled: ready,
           testTypes: ready ? pushTestTypes : [],
           publicKey: ready ? env.PUSH_PUBLIC_KEY : null,
         });
+      }
+      if (url.pathname === '/api/push/budget') {
+        if (!configured(env)) return json(503, { error: 'API-Budgetwarnungen sind hier noch nicht verfügbar.' });
+        if (request.method !== 'POST') return json(405, { error: 'Diese Push-Aktion ist nicht verfügbar.' });
+        if (request.headers.get('Origin') !== url.origin) return json(403, { error: 'Ungültige Herkunft.' });
+        const body = await request.json().catch(() => null);
+        if (!subscriptionValid(body?.subscription) || typeof body.enabled !== 'boolean') {
+          return json(400, { error: 'Ungültige Anmeldung für API-Budgetwarnungen.' });
+        }
+        await env.API_USAGE.getByName('transitous').setAlerts(body.subscription, body.enabled);
+        return json(200, { ok: true });
       }
       if (url.pathname === '/api/push/watch' || url.pathname === '/api/push/test') {
         if (!configured(env)) return json(503, { error: 'Push wird eingerichtet.' });
@@ -84,16 +96,60 @@ export class ApiUsage extends DurableObject {
     this.sql = ctx.storage.sql;
     this.sql.exec('CREATE TABLE IF NOT EXISTS calls (id INTEGER PRIMARY KEY, timestamp INTEGER, date TEXT, kind TEXT)');
     this.sql.exec('CREATE INDEX IF NOT EXISTS call_time ON calls(timestamp)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS budget_level (id INTEGER PRIMARY KEY, level INTEGER NOT NULL)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS budget_devices (endpoint TEXT PRIMARY KEY, subscription TEXT NOT NULL)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS budget_queue (id INTEGER PRIMARY KEY, endpoint TEXT NOT NULL, level INTEGER NOT NULL, due INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0)');
   }
 
-  reserve(kind) {
+  async reserve(kind) {
     const now = Date.now();
-    return this.ctx.storage.transactionSync(() => {
-      if (this.count(now) >= apiLimit) return false;
+    const result = this.ctx.storage.transactionSync(() => {
+      const before = this.count(now);
+      if (before >= apiLimit) return { allowed: false, queued: false };
       this.sql.exec('DELETE FROM calls WHERE timestamp <= ?', now - (historyDays + 1) * day);
       this.sql.exec('INSERT INTO calls(timestamp,date,kind) VALUES (?,?,?)', now, dayKey(now), kind);
-      return true;
+      const previous = this.sql.exec('SELECT level FROM budget_level WHERE id = 1').toArray()[0]?.level || 0;
+      const level = crossedBudgetThreshold(previous, before, before + 1);
+      if (level || (before < apiLimit / 2 && previous)) {
+        this.sql.exec('INSERT INTO budget_level (id, level) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET level = excluded.level', level);
+      }
+      const queued = level ? this.sql.exec('INSERT INTO budget_queue (endpoint,level,due) SELECT endpoint, ?, ? FROM budget_devices', level, now).rowsWritten : 0;
+      return { allowed: true, queued };
     });
+    if (result.queued) await this.ctx.storage.setAlarm(now);
+    return result.allowed;
+  }
+
+  setAlerts(subscription, enabled) {
+    this.ctx.storage.transactionSync(() => {
+      if (enabled) {
+        this.sql.exec('INSERT INTO budget_devices (endpoint, subscription) VALUES (?, ?) ON CONFLICT(endpoint) DO UPDATE SET subscription = excluded.subscription',
+          subscription.endpoint, JSON.stringify(subscription));
+      } else {
+        this.sql.exec('DELETE FROM budget_queue WHERE endpoint = ?', subscription.endpoint);
+        this.sql.exec('DELETE FROM budget_devices WHERE endpoint = ?', subscription.endpoint);
+      }
+    });
+  }
+
+  async alarm() {
+    const now = Date.now();
+    const jobs = this.sql.exec(`SELECT budget_queue.*, budget_devices.subscription FROM budget_queue
+      JOIN budget_devices USING(endpoint) WHERE due <= ? ORDER BY due, id LIMIT 16`, now).toArray();
+    for (const job of jobs) {
+      const stillEnabled = this.sql.exec('SELECT 1 FROM budget_queue WHERE id = ?', job.id).toArray().length;
+      if (!stillEnabled) continue;
+      try {
+        await deliver(this.env, JSON.parse(job.subscription), budgetWarning(job.level));
+        this.sql.exec('DELETE FROM budget_queue WHERE id = ?', job.id);
+      } catch (error) {
+        if ([404, 410].includes(error.status)) this.setAlerts({ endpoint: job.endpoint }, false);
+        else if (job.attempts >= 2) this.sql.exec('DELETE FROM budget_queue WHERE id = ?', job.id);
+        else this.sql.exec('UPDATE budget_queue SET attempts = attempts + 1, due = ? WHERE id = ?', Date.now() + minute, job.id);
+      }
+    }
+    const next = this.sql.exec('SELECT MIN(due) AS due FROM budget_queue').one().due;
+    if (next !== null) await this.ctx.storage.setAlarm(Math.max(Date.now() + 1000, next));
   }
 
   count(now) {

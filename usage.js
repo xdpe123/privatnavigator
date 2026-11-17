@@ -1,6 +1,22 @@
 export const apiLimit = 720;
 export const day = 86_400_000;
 export const historyDays = 14;
+export const budgetThresholds = [50, 80, 90, 100];
+
+export function crossedBudgetThreshold(previousLevel, before, after) {
+  const previous = before < apiLimit / 2 ? 0 : previousLevel;
+  return budgetThresholds.filter((level) => level > previous && after * 100 >= apiLimit * level).at(-1) || 0;
+}
+
+export function budgetWarning(level) {
+  const count = Math.ceil(apiLimit * level / 100);
+  return {
+    title: level === 100 ? 'API-Limit erreicht' : `API-Budget · ${level} % verbraucht`,
+    body: level === 100 ? `${count} von ${apiLimit} Aufrufen in den letzten 24 Stunden. Neue Fahrplanabfragen sind vorübergehend pausiert.`
+      : `${count} von ${apiLimit} Aufrufen in den letzten 24 Stunden. Noch ${apiLimit - count} Aufrufe verfügbar.`,
+    url: '/#settings', tag: `api-budget-${level}`,
+  };
+}
 const berlinDate = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Berlin' });
 
 export function dayKey(time) {

@@ -1,4 +1,5 @@
 import { evaluateWatch, minute } from './trip-monitor.js';
+import { budgetThresholds, budgetWarning } from './usage.js';
 
 const cases = {
   general: { label: 'Allgemeiner Zustelltest' },
@@ -16,9 +17,17 @@ const cases = {
   unavailable: { label: 'Status ohne verfügbare Live-Daten', reminder: 60, unavailable: true },
 };
 
-export const pushTestTypes = Object.entries(cases).map(([type, { label }]) => ({ type, label }));
+const budgetExamples = Object.fromEntries(budgetThresholds.map((level) => [`budget${level}`, level]));
+export const pushTestTypes = [
+  ...Object.entries(cases).map(([type, { label }]) => ({ type, label })),
+  ...Object.entries(budgetExamples).map(([type, level]) => ({ type, label: `API-Budget · ${level} %` })),
+];
 
 export function pushPreview(type, now = Date.now()) {
+  if (Object.hasOwn(budgetExamples, type)) {
+    const warning = budgetWarning(budgetExamples[type]);
+    return { ...warning, title: `Test · ${warning.title}`, tag: `test-${type}` };
+  }
   if (!Object.hasOwn(cases, type)) return null;
   if (type === 'general') return {
     title: 'Privatnavigator · Push-Test',

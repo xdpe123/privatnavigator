@@ -32,11 +32,13 @@ let restoreCursor;
 let pushSetup;
 let serviceWorker;
 let automaticPush = true;
+let budgetPush = true;
 let pushPreferences = normalizePushOptions();
 const pushRegistrations = new Map();
 try {
   const stored = JSON.parse(localStorage.getItem(pushSettingsKey));
   automaticPush = stored?.automatic !== false;
+  budgetPush = stored?.budget !== false;
   pushPreferences = normalizePushOptions(stored?.preferences);
 } catch {}
 let filters = { ticket: false, groups: allGroups };
@@ -981,10 +983,35 @@ async function pushRequest(method, data) {
   return result;
 }
 
-function subscribeForPush() {
-  return serviceWorker.pushManager.subscribe({
+let budgetSync = Promise.resolve();
+function syncBudgetPush(enabled, subscription) {
+  const update = budgetSync.then(async () => {
+    if (!pushSetup?.budgetAlerts || !serviceWorker || !navigator.onLine) return;
+    const approved = subscription || await serviceWorker.pushManager.getSubscription();
+    if (!approved) return;
+    const response = await fetch('/api/push/budget', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled, subscription: approved.toJSON() }),
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => null);
+      throw new Error(result?.error || 'Die API-Budgetwarnungen konnten nicht gespeichert werden.');
+    }
+  });
+  budgetSync = update.catch(() => {});
+  return update;
+}
+
+function reportBudgetPushError(error) {
+  setStatus('push-settings-status', error.message);
+}
+
+async function subscribeForPush() {
+  const subscription = await serviceWorker.pushManager.subscribe({
     userVisibleOnly: true, applicationServerKey: pushSetup.publicKey,
   });
+  void syncBudgetPush(budgetPush, subscription).catch(reportBudgetPushError);
+  return subscription;
 }
 
 function startTripPush(trip, approved) {
@@ -1038,21 +1065,25 @@ const pushFields = new Map(Object.entries(pushOptions).map(([key, label]) => {
   return [key, input];
 }));
 byId('auto-push').checked = automaticPush;
+byId('budget-push').checked = budgetPush;
 byId('push-settings-form').onsubmit = async (event) => {
   event.preventDefault();
   const button = byId('save-push-settings');
   button.disabled = true;
   savingPushSettings = true;
   const automatic = byId('auto-push').checked;
+  const budget = byId('budget-push').checked;
   const preferences = Object.fromEntries([...pushFields].map(([key, input]) => [key, input.checked]));
   setStatus('push-settings-status', 'Einstellungen werden gespeichert …');
   try {
     await Promise.allSettled(pushRegistrations.values());
     const ids = savedTrips.flatMap((trip) => trip.watchId ? [trip.watchId] : []);
     if (ids.length) await pushRequest('PATCH', { ids, preferences });
+    budgetPush = budget;
+    await syncBudgetPush(budget);
     automaticPush = automatic;
     pushPreferences = preferences;
-    localStorage.setItem(pushSettingsKey, JSON.stringify({ automatic, preferences }));
+    localStorage.setItem(pushSettingsKey, JSON.stringify({ automatic, preferences, budget }));
     setStatus('push-settings-status', 'Push-Einstellungen gespeichert.');
   } catch (error) {
     setStatus('push-settings-status', error.message);
@@ -1085,9 +1116,10 @@ async function setupPush() {
   const response = await fetch('/api/push');
   pushSetup = await response.json();
   if (window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window &&
-      (pushSetup.enabled || pushSetup.testEnabled)) {
+      (pushSetup.enabled || pushSetup.budgetAlerts || pushSetup.testEnabled)) {
     serviceWorker = await navigator.serviceWorker.ready;
   }
+  void syncBudgetPush(budgetPush).catch(reportBudgetPushError);
   if (pushSetup.testEnabled) {
     byId('push-test').hidden = false;
     byId('send-push-test').disabled = !serviceWorker;
@@ -1103,7 +1135,7 @@ async function setupPush() {
       if (!serviceWorker) setStatus('selected-push-test-status', 'Öffne den Privatnavigator auf dem iPhone über sein Home-Bildschirm-Symbol.');
     }
   }
-  if (serviceWorker && pushSetup.enabled) byId('allow-push').hidden = false;
+  if (serviceWorker && (pushSetup.enabled || pushSetup.budgetAlerts)) byId('allow-push').hidden = false;
   renderSavedTrips();
   const open = savedTrips.find(({ key }) => location.hash === `#fahrt-${key}`);
   if (open && !savedRefreshes.has(open.key)) openTripLink(false);
@@ -1117,9 +1149,7 @@ async function sendPushTest(button, status, type = 'general') {
   button.disabled = true;
   setStatus(status, 'Testmitteilung wird gesendet …');
   try {
-    const subscription = await serviceWorker.pushManager.subscribe({
-      userVisibleOnly: true, applicationServerKey: pushSetup.publicKey,
-    });
+    const subscription = await subscribeForPush();
     const response = await fetch('/api/push/test', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type, subscription: subscription.toJSON() }),
@@ -1127,6 +1157,7 @@ async function sendPushTest(button, status, type = 'general') {
     const result = await response.json();
     if (!response.ok) {
       if (result.resetSubscription) {
+        await syncBudgetPush(false, subscription).catch(() => {});
         await subscription.unsubscribe();
         throw new Error(`${result.error} Das alte Abo wurde zurückgesetzt. Tippe erneut auf „Testmitteilung senden“.`);
       }
@@ -1571,4 +1602,5 @@ function refreshVisibleData() {
 document.addEventListener('visibilitychange', refreshVisibleData);
 window.addEventListener('pageshow', (event) => { if (event.persisted) refreshVisibleData(); });
 window.addEventListener('online', refreshVisibleData);
+window.addEventListener('online', () => void syncBudgetPush(budgetPush).catch(reportBudgetPushError));
 if (currentView === 'search-view' || currentView === 'saved-trips') refreshVisibleData();
