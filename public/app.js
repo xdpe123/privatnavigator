@@ -24,6 +24,8 @@ let activeSearch;
 let tripQuery;
 let tripPage;
 let resultsReady = false;
+const liveRequests = new Map();
+const savedRefreshes = new Map();
 let restoreCursor;
 let pushSetup;
 let serviceWorker;
@@ -67,6 +69,31 @@ async function getJson(path, params, signal) {
   const result = await response.json();
   if (!response.ok) throw new Error(result.error);
   return result;
+}
+
+function fetchLiveJourney(id) {
+  if (!liveRequests.has(id)) {
+    const request = getJson('/api/refresh', { id }).then((journey) => {
+      if (!Array.isArray(journey.legs)) throw new Error('Der Fahrplandienst hat keine Fahrtdetails geliefert.');
+      return journey;
+    }).finally(() => liveRequests.delete(id));
+    liveRequests.set(id, request);
+  }
+  return liveRequests.get(id);
+}
+
+function refreshSavedTrip(trip) {
+  if (!savedRefreshes.has(trip.key)) {
+    const request = fetchLiveJourney(trip.journey.id).then((journey) => {
+      if (savedTrips.some(({ key }) => key === trip.key)) {
+        const written = writeTrips(savedTrips.map((item) =>
+          item.key === trip.key ? { ...item, journey, updated: Date.now() } : item));
+        if (!written) throw new Error('Der neue Stand konnte nicht gespeichert werden.');
+      }
+    }).finally(() => savedRefreshes.delete(trip.key));
+    savedRefreshes.set(trip.key, request);
+  }
+  return savedRefreshes.get(trip.key);
 }
 
 function localNow() {
@@ -761,7 +788,9 @@ function renderTransferCheck(journey, from, to, options) {
   return section;
 }
 
-function renderJourney(journey, { from, to, best = false, saved = false, recurring = false, options = routingOptions(), checkAlternatives = true } = {}) {
+function renderJourney(journey, settings = {}) {
+  const { from, to, best = false, saved = false, recurring = false, options = routingOptions(),
+    checkAlternatives = true, refreshOnOpen = false } = settings;
   const details = element('details', null, 'panel journey');
   const summary = element('summary');
   const duration = Math.round(journey.duration / 60);
@@ -830,6 +859,32 @@ function renderJourney(journey, { from, to, best = false, saved = false, recurri
     repeat.onclick = () => recurringTrips.open(journey, from, to, options);
     details.append(repeat);
   }
+  if (refreshOnOpen && journey.id) {
+    let id = journey.id;
+    let fetching = false;
+    const refresh = async () => {
+      if (!details.open || !navigator.onLine || fetching) return;
+      fetching = true;
+      details.querySelector('.journey-refresh-status')?.remove();
+      const status = element('p', 'Fahrt wird aktualisiert …', 'muted journey-refresh-status');
+      status.setAttribute('role', 'status');
+      details.append(status);
+      try {
+        const live = await fetchLiveJourney(id);
+        if (!details.isConnected) return;
+        id = live.id || id;
+        const replacement = renderJourney(live, { ...settings, refreshOnOpen: false });
+        details.className = replacement.className;
+        details.replaceChildren(...replacement.childNodes);
+      } catch {
+        status.textContent = 'Live-Daten gerade nicht abrufbar. Die bisherigen Fahrtdetails bleiben verfügbar.';
+      } finally {
+        fetching = false;
+      }
+    };
+    details.addEventListener('toggle', refresh);
+    details.addEventListener('refreshjourney', refresh);
+  }
   return details;
 }
 
@@ -886,6 +941,8 @@ async function setupPush() {
     if (!serviceWorker) setStatus('push-test-status', 'Auf dem iPhone in Safari zum Home-Bildschirm hinzufügen und über das App-Symbol öffnen.');
   }
   renderSavedTrips();
+  const open = savedTrips.find(({ key }) => location.hash === `#fahrt-${key}`);
+  if (open && !savedRefreshes.has(open.key)) openTripLink(false);
 }
 
 byId('send-push-test').onclick = async () => {
@@ -915,11 +972,16 @@ byId('send-push-test').onclick = async () => {
   }
 };
 
+function nextSavedTrip() {
+  const now = Date.now();
+  return savedTrips.filter(({ journey }) => Date.parse(journey.endTime) > now)
+    .sort((a, b) => Date.parse(a.journey.startTime) - Date.parse(b.journey.startTime))[0];
+}
+
 function renderNextTrip() {
   const now = Date.now();
   const card = byId('next-trip');
-  const trip = savedTrips.filter(({ journey }) => Date.parse(journey.endTime) > now)
-    .sort((a, b) => Date.parse(a.journey.startTime) - Date.parse(b.journey.startTime))[0];
+  const trip = nextSavedTrip();
   card.hidden = !trip;
   if (!trip) return;
   const { journey, from, to } = trip;
@@ -964,16 +1026,12 @@ function renderSavedTrip(trip) {
   const status = element('p', null, 'field-status');
   status.setAttribute('role', 'status');
   refresh.onclick = async () => {
+    if (!navigator.onLine || refresh.disabled) return;
     refresh.disabled = true;
     status.textContent = 'Aktualisiere …';
     try {
-      const journey = await getJson('/api/refresh', { id: trip.journey.id });
-      if (!Array.isArray(journey.legs)) throw new Error('Der Fahrplandienst hat keine Fahrtdetails geliefert.');
-      if (savedTrips.some(({ key }) => key === trip.key) && writeTrips(savedTrips.map((item) =>
-        item.key === trip.key ? { ...item, journey, updated: Date.now() } : item
-      ))) {
-        openTripLink();
-      }
+      await refreshSavedTrip(trip);
+      if (card.isConnected && location.hash === `#fahrt-${trip.key}`) openTripLink(false);
     } catch (error) {
       status.textContent = `${error.message} Der gespeicherte Stand ist weiter verfügbar.`;
     } finally {
@@ -1004,8 +1062,10 @@ function renderSavedTrip(trip) {
     const push = element('button', trip.watchId ? 'Push deaktivieren' : 'Push aktivieren');
     push.type = 'button';
     push.disabled = !trip.watchId && Date.parse(trip.journey.endTime) <= Date.now();
+    if (trip.watchId) status.textContent = 'Push ist aktiv. Status etwa 60 und 30 Min. vor Abfahrt sowie bei Änderungen.';
     push.onclick = async () => {
       push.disabled = remove.disabled = true;
+      status.textContent = trip.watchId ? 'Push wird deaktiviert …' : 'Push wird aktiviert …';
       try {
         if (trip.watchId) {
           await pushRequest('DELETE', trip.watchId);
@@ -1013,6 +1073,7 @@ function renderSavedTrip(trip) {
         } else {
           await startTripPush(trip);
         }
+        if (location.hash === `#fahrt-${trip.key}`) openTripLink(false);
       } catch (error) {
         status.textContent = error.name === 'NotAllowedError'
           ? 'Erlaube Mitteilungen in den iPhone-Einstellungen für diese Web-App.' : error.message;
@@ -1106,9 +1167,7 @@ byId('import-file').onchange = async (event) => {
   }
 };
 
-let pushUpdateHandled;
-
-function openTripLink() {
+function openTripLink(refresh = true) {
   showView();
   if (currentView !== 'journey-view') return;
   const content = byId('journey-view-body');
@@ -1137,14 +1196,10 @@ function openTripLink() {
   if (!trip) return wrapper.append(element('p', 'Diese Fahrt ist auf diesem Gerät nicht gespeichert.'));
   const card = renderSavedTrip(trip);
   wrapper.append(card);
-  const update = new URLSearchParams(location.search).get('update');
-  if (navigator.onLine && update && update !== pushUpdateHandled) {
-    pushUpdateHandled = update;
-    card.querySelector('.refresh-trip').click();
-  }
+  if (refresh && navigator.onLine) card.querySelector('.refresh-trip').click();
 }
 
-window.addEventListener('hashchange', openTripLink);
+window.addEventListener('hashchange', () => openTripLink());
 for (const event of ['online', 'offline']) window.addEventListener(event, () => {
   byId('offline-journey').hidden = navigator.onLine;
 });
@@ -1202,7 +1257,7 @@ async function showTripPage(query, controller, direction) {
       : Date.parse(a.endTime) - Date.parse(b.endTime)) || a.transfers - b.transfers || a.duration - b.duration);
     const best = itineraries.find((journey) => !isCancelled(journey) && !transfersFor(journey).some((check) => check.minutes < 0));
     byId('journeys').replaceChildren(...itineraries.map((journey) =>
-      renderJourney(journey, { from: query.from, to: query.to, best: journey === best, options: query.options })
+      renderJourney(journey, { from: query.from, to: query.to, best: journey === best, options: query.options, refreshOnOpen: true })
     ));
     setStatus('result-status', [
       itineraries.length ? '' : 'Keine Verbindungen im Suchzeitraum gefunden.',
@@ -1316,3 +1371,31 @@ try {
     byId('planner').requestSubmit();
   }
 } catch {}
+
+let lastResume = 0;
+function refreshVisibleData() {
+  if (!navigator.onLine || document.visibilityState !== 'visible' || Date.now() - lastResume < 1500) return;
+  if (document.querySelector('dialog[open]')) return;
+  lastResume = Date.now();
+  if (currentView === 'journey-view') {
+    const refresh = byId('journey-view-body').querySelector('.refresh-trip');
+    if (refresh) refresh.click();
+    else if (location.hash.startsWith('#wiederholung-')) openTripLink();
+  } else if (currentView === 'results' && tripQuery && tripPage) {
+    const open = byId('journeys').querySelector('.journey[open]');
+    if (open) open.dispatchEvent(new Event('refreshjourney'));
+    else if (!Object.values(paging).some((button) => button.disabled)) {
+      activeSearch?.abort();
+      activeSearch = new AbortController();
+      void showTripPage(tripQuery, activeSearch);
+    }
+  } else if (currentView === 'search-view' || currentView === 'saved-trips') {
+    const trip = nextSavedTrip();
+    if (trip) void refreshSavedTrip(trip).catch(() => {});
+  }
+}
+
+document.addEventListener('visibilitychange', refreshVisibleData);
+window.addEventListener('pageshow', (event) => { if (event.persisted) refreshVisibleData(); });
+window.addEventListener('online', refreshVisibleData);
+if (currentView === 'search-view' || currentView === 'saved-trips') refreshVisibleData();
