@@ -4,6 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f4f4f6">
+  <script>
+    try {
+      if (localStorage.getItem('privatnavigator.theme') === 'dark') {
+        document.documentElement.dataset.theme = 'dark';
+        document.querySelector('meta[name="theme-color"]').content = '#171a1e';
+      }
+    } catch {}
+  </script>
   <title>Privatnavigator</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" sizes="180x180" href="/navigator-180.png">
@@ -12,7 +20,7 @@
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <header><div class="wrap"><a class="brand" href="#suche"><img src="/navigator-192.png" width="28" height="28" alt="">Privatnavigator</a></div></header>
+  <header id="app-header"><div class="wrap"><a class="brand" href="#suche"><img src="/navigator-192.png" width="28" height="28" alt="">Privatnavigator</a></div></header>
   <main class="wrap">
     <section id="search-view" aria-labelledby="search-title">
     <h1 id="search-title">Verbindung suchen</h1>
@@ -36,7 +44,12 @@
       </div>
       <div class="when">
         <label>Suchzeit<select id="direction"><option value="false">Abfahrt</option><option value="true">Ankunft</option></select></label>
-        <label class="time-field">Datum und Uhrzeit<input id="time" type="datetime-local" required></label>
+        <label class="time-field" for="time">Datum und Uhrzeit
+          <span class="date-control">
+            <span id="time-display" aria-hidden="true"></span>
+            <input id="time" type="datetime-local" required>
+          </span>
+        </label>
         <button type="button" id="now">Jetzt</button>
       </div>
       <div class="actions">
@@ -56,13 +69,27 @@
       <h2 id="favorites-title">Favoriten</h2>
       <div id="favorite-items" class="favorite-items"></div>
     </section>
+    </section>
     <section id="results" aria-labelledby="results-title" hidden>
-      <h2 id="results-title" tabindex="-1">Verbindungen</h2>
+      <div class="result-top">
+        <a class="result-icon" href="#suche" aria-label="Zurück zur Suche">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg>
+        </a>
+        <h1 id="results-title" tabindex="-1">Verbindungen</h1>
+        <button id="result-favorite" class="result-icon" type="button" aria-label="Strecke als Favorit speichern" aria-pressed="false">☆</button>
+      </div>
+      <div class="result-query">
+        <a class="result-places" href="#suche" aria-label="Start und Ziel bearbeiten">
+          <span id="query-from"></span><span id="query-to"></span>
+        </a>
+        <button id="result-swap" class="result-icon" type="button" aria-label="Start und Ziel tauschen">⇄</button>
+        <p id="query-time"></p>
+        <p id="query-filters" class="muted" hidden></p>
+      </div>
       <p id="result-status" role="status"></p>
       <button type="button" id="earlier-trips" class="trip-page" hidden>↑ Frühere Verbindungen</button>
       <div id="journeys"></div>
       <button type="button" id="later-trips" class="trip-page" hidden>↓ Spätere Verbindungen</button>
-    </section>
     </section>
     <section id="saved-trips" aria-labelledby="saved-title" hidden>
       <h1 id="saved-title">Meine Fahrten</h1>
@@ -85,6 +112,11 @@
     </section>
     <section id="settings" aria-labelledby="settings-title" hidden>
     <h1 id="settings-title">Einstellungen</h1>
+    <fieldset class="panel theme-settings">
+      <legend>Darstellung</legend>
+      <label><input type="radio" name="theme" value="light"> Hell</label>
+      <label><input type="radio" name="theme" value="dark"> Dunkel</label>
+    </fieldset>
     <div class="panel">
       <h2>Transitous-API</h2>
       <p id="usage-status" role="status"></p>
@@ -147,7 +179,7 @@
     <div id="map-canvas" class="map-canvas" aria-label="Karte des Fahrtverlaufs" hidden></div>
     <div id="map-controls" class="map-controls" hidden>
       <button id="map-overview" type="button">Ganze Route</button>
-      <button id="map-location" type="button" aria-pressed="false">Live-Standort</button>
+      <button id="map-location" type="button">Mein Standort</button>
     </div>
     <div id="map-walks" class="map-walks"></div>
     <p id="map-location-status" role="status" hidden></p>

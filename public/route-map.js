@@ -73,6 +73,8 @@ export function createRouteMap(fetchDetails) {
   let watch;
   let marker;
   let accuracy;
+  let focusedWalk = false;
+  const resize = new ResizeObserver(() => map?.invalidateSize({ pan: false }));
 
   function status(id, message) {
     const node = get(id);
@@ -86,24 +88,23 @@ export function createRouteMap(fetchDetails) {
     marker?.remove();
     accuracy?.remove();
     marker = accuracy = undefined;
-    locate.setAttribute('aria-pressed', 'false');
     status('map-location-status', '');
   }
 
   dialog.addEventListener('close', () => {
     loading?.abort();
     stopLocation();
+    resize.disconnect();
     map?.remove();
     map = undefined;
   });
 
-  locate.onclick = () => {
-    if (watch !== undefined) return stopLocation();
+  function startLocation() {
+    if (watch !== undefined) return;
     if (!window.isSecureContext || !navigator.geolocation) {
       status('map-location-status', 'Öffne die HTTPS-Adresse der App, um deinen Standort anzuzeigen.');
       return;
     }
-    locate.setAttribute('aria-pressed', 'true');
     status('map-location-status', 'Standort wird ermittelt …');
     watch = navigator.geolocation.watchPosition(({ coords }) => {
       if (watch === undefined || !map || !dialog.open) return;
@@ -115,7 +116,7 @@ export function createRouteMap(fetchDetails) {
         accuracy = library.circle(point, { radius: coords.accuracy, color: '#145484', weight: 1, fillOpacity: 0.12 }).addTo(map);
         marker = library.circleMarker(point, { radius: 8, color: '#fff', weight: 3, fillColor: '#145484', fillOpacity: 1 })
           .addTo(map).bindTooltip('Mein Standort');
-        map.panInside(point, { padding: [24, 24] });
+        if (!focusedWalk) map.panInside(point, { padding: [24, 24] });
       }
       status('map-location-status', `Standort aktiv · Genauigkeit ca. ${Math.round(coords.accuracy)} m`);
     }, ({ code }) => {
@@ -125,6 +126,11 @@ export function createRouteMap(fetchDetails) {
         ? 'Erlaube den Standortzugriff in deinen iPhone- oder Browser-Einstellungen.'
         : 'Der aktuelle Standort ist gerade nicht verfügbar.');
     }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 5000 });
+  }
+
+  locate.onclick = () => {
+    if (marker) map.setView(marker.getLatLng(), Math.max(map.getZoom(), 16));
+    else startLocation();
   };
 
   return async (journey, walkIndex = null) => {
@@ -160,11 +166,13 @@ export function createRouteMap(fetchDetails) {
       if (!points.length) throw new Error(detailError || 'Für diese Fahrt sind keine Kartendaten verfügbar.');
       canvas.hidden = get('map-controls').hidden = false;
       map = library.map(canvas, { scrollWheelZoom: false });
+      resize.observe(canvas);
       library.tileLayer(tiles, {
         maxZoom: 19,
         attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       }).addTo(map);
       const overview = () => {
+        focusedWalk = false;
         for (const button of walks.querySelectorAll('button')) button.setAttribute('aria-pressed', 'false');
         map.fitBounds(points, { padding: [24, 24], maxZoom: 15 });
         status('map-status', detailError || (records.some((record) => !record.points.length)
@@ -192,6 +200,7 @@ export function createRouteMap(fetchDetails) {
         button.textContent = `Fußweg · ${placeName(leg.to)}`;
         button.setAttribute('aria-pressed', 'false');
         const focus = () => {
+          focusedWalk = true;
           for (const child of walks.querySelectorAll('button')) child.setAttribute('aria-pressed', String(child === button));
           map.fitBounds(line.length ? line : endpoints, { padding: [30, 30], maxZoom: 17 });
           status('map-status', line.length ? '' : 'Für diesen Fußweg sind nur die Haltepunkte verfügbar.');
@@ -206,6 +215,7 @@ export function createRouteMap(fetchDetails) {
         leg.from.name === selected.from.name && leg.to.name === selected.to.name);
       overview();
       preferred?.focus?.();
+      startLocation();
     } catch (error) {
       if (!controller.signal.aborted) status('map-status', error.message);
     }

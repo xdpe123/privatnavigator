@@ -12,6 +12,7 @@ const storageKey = 'privatnavigator.favorites.v1';
 const tripStorageKey = 'privatnavigator.trips.v1';
 const filterStorageKey = 'privatnavigator.filters.v1';
 const calendar = new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium' });
+const dateTimeLabel = new Intl.DateTimeFormat('de-DE', { dateStyle: 'short', timeStyle: 'short' });
 const places = { from: null, to: null };
 const liveLocation = { id: 'live-location', name: 'Mein Standort', type: 'LOCATION' };
 let favorites = [];
@@ -19,6 +20,7 @@ let savedTrips = [];
 let activeSearch;
 let tripQuery;
 let tripPage;
+let resultsReady = false;
 let pushSetup;
 let serviceWorker;
 let filters = { ticket: false, groups: allGroups };
@@ -91,9 +93,14 @@ function refreshFavoriteButtons() {
   const saved = readyRoute() && favorites.some(({ key }) => key === currentRoute().key);
   routeButton.textContent = saved ? '★ Strecke gespeichert' : '☆ Strecke speichern';
   routeButton.setAttribute('aria-pressed', String(Boolean(saved)));
+  const compact = byId('result-favorite');
+  compact.disabled = !readyRoute();
+  compact.textContent = saved ? '★' : '☆';
+  compact.setAttribute('aria-pressed', String(Boolean(saved)));
+  compact.setAttribute('aria-label', saved ? 'Strecke aus Favoriten entfernen' : 'Strecke als Favorit speichern');
 }
 
-function choose(field, place) {
+function choose(field, place, invalidate = true) {
   places[field] = place;
   const input = byId(field);
   input.value = place?.name ?? '';
@@ -101,13 +108,14 @@ function choose(field, place) {
   byId(`${field}-options`).hidden = true;
   setStatus(`${field}-status`, '');
   refreshFavoriteButtons();
-  clearResults();
+  if (invalidate) clearResults();
 }
 
 function clearResults() {
   activeSearch?.abort();
   tripQuery = tripPage = null;
-  byId('results').hidden = true;
+  resultsReady = false;
+  if (location.hash === '#verbindungen') showView();
 }
 
 const modeInputs = new Map(allGroups.map((group) => {
@@ -200,19 +208,35 @@ async function loadUsage() {
 
 byId('reload-usage').onclick = loadUsage;
 
+for (const option of document.querySelectorAll('input[name="theme"]')) {
+  option.checked = option.value === (document.documentElement.dataset.theme || 'light');
+  option.onchange = () => {
+    document.documentElement.dataset.theme = option.value;
+    document.querySelector('meta[name="theme-color"]').content = option.value === 'dark' ? '#171a1e' : '#f4f4f6';
+    try {
+      localStorage.setItem('privatnavigator.theme', option.value);
+    } catch {
+      // The choice still applies during this session.
+    }
+  };
+}
+
 const tabs = [...document.querySelectorAll('.bottom-nav a[data-view]')];
 let currentView;
 
 function showView() {
   const hash = location.hash;
-  const view = hash === '#settings' ? 'settings'
+  const view = hash === '#verbindungen' && resultsReady ? 'results' : hash === '#settings' ? 'settings'
     : hash === '#saved-trips' || hash.startsWith('#fahrt-') ? 'saved-trips' : 'search-view';
   if (view === currentView) return;
   currentView = view;
+  document.body.dataset.view = view;
+  byId('results').hidden = view !== 'results';
+  byId('app-header').hidden = view === 'results';
   for (const tab of tabs) {
     const selected = tab.dataset.view === view;
     byId(tab.dataset.view).hidden = !selected;
-    if (selected) tab.setAttribute('aria-current', 'page');
+    if (selected || (view === 'results' && tab.dataset.view === 'search-view')) tab.setAttribute('aria-current', 'page');
     else tab.removeAttribute('aria-current');
   }
   window.scrollTo(0, 0);
@@ -389,13 +413,32 @@ byId('reverse').onclick = () => {
   choose('to', from);
 };
 byId('save-route').onclick = () => toggleFavorite(currentRoute());
+byId('result-favorite').onclick = () => toggleFavorite(currentRoute());
+byId('result-swap').onclick = () => {
+  const { from, to } = places;
+  choose('from', to, false);
+  choose('to', from, false);
+  byId('planner').requestSubmit();
+};
+
+function showSelectedTime() {
+  const date = new Date(byId('time').value);
+  byId('time-display').textContent = Number.isFinite(date.getTime()) ? dateTimeLabel.format(date) : 'Datum und Uhrzeit wählen';
+}
+
 byId('now').onclick = () => {
   byId('time').value = localNow();
+  showSelectedTime();
   clearResults();
 };
-byId('time').onchange = clearResults;
+byId('time').oninput = () => {
+  showSelectedTime();
+  clearResults();
+};
+byId('time').onchange = byId('time').oninput;
 byId('direction').onchange = clearResults;
 byId('time').value = localNow();
+showSelectedTime();
 renderFavorites();
 
 function timeLabel(value) {
@@ -832,9 +875,18 @@ byId('planner').addEventListener('submit', async (event) => {
   tripQuery = tripPage = null;
   updatePaging();
   setStatus('form-status', '');
-  byId('results').hidden = false;
+  resultsReady = true;
+  byId('query-from').textContent = places.from.name;
+  byId('query-to').textContent = places.to.name;
+  const arriveBy = byId('direction').value === 'true';
+  const date = new Date(byId('time').value);
+  byId('query-time').textContent = `${arriveBy ? 'Ankunft' : 'Abfahrt'} · ${dateTimeLabel.format(date)}`;
+  setStatus('query-filters', byId('filter-summary').textContent);
   byId('journeys').replaceChildren();
-  setStatus('result-status', `Suche ${places.from.name} → ${places.to.name} …`);
+  setStatus('result-status', 'Verbindungen werden gesucht …');
+  location.hash = '#verbindungen';
+  showView();
+  byId('results-title').focus({ preventScroll: true });
   try {
     let { from, to } = places;
     if (from.type === 'LOCATION' || to.type === 'LOCATION') {
@@ -843,11 +895,10 @@ byId('planner').addEventListener('submit', async (event) => {
       if (from.type === 'LOCATION') from = position;
       if (to.type === 'LOCATION') to = position;
     }
-    const arriveBy = byId('direction').value === 'true';
     const params = {
       from: from.id,
       to: to.id,
-      time: new Date(byId('time').value).toISOString(),
+      time: date.toISOString(),
       arriveBy,
       ...(filters.ticket ? { ticket: 'true' } : {}),
       ...(filters.groups.length < allGroups.length ? { modes: filters.groups.join(',') } : {}),
