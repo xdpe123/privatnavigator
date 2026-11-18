@@ -18,6 +18,7 @@ const files = new Map([
   ['/search-filters.js', ['search-filters.js', 'text/javascript']],
   ['/route-map.js', ['route-map.js', 'text/javascript']],
   ['/journey-details.js', ['journey-details.js', 'text/javascript']],
+  ['/comparison.js', ['comparison.js', 'text/javascript']],
   ['/push-options.js', ['push-options.js', 'text/javascript']],
   ['/punctuality-view.js', ['punctuality-view.js', 'text/javascript']],
   ['/recurring-trips.js', ['recurring-trips.js', 'text/javascript']],

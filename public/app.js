@@ -2,6 +2,7 @@ import { allGroups, modeGroups, ticketGroups } from './search-filters.js';
 import { createRouteMap } from './route-map.js';
 import { alternativeStops, calendarFile, isCancelled, shortestAlternatives, transfersFor, tripTimeline } from './journey-details.js';
 import { nextOccurrence, setupRecurringTrips } from './recurring-trips.js';
+import { setupComparison } from './comparison.js';
 import { setupPunctuality } from './punctuality-view.js';
 import { normalizePushOptions, pushOptions } from './push-options.js';
 
@@ -425,7 +426,22 @@ function renderFavorites() {
     remove.type = 'button';
     remove.setAttribute('aria-label', `Favorit entfernen: ${label}`);
     remove.onclick = () => toggleFavorite(favorite);
-    row.append(open, remove);
+    row.append(open);
+    if (from && to || place?.type === 'STOP') {
+      const quick = element('button', place ? 'Abfahrten' : 'Jetzt fahren');
+      quick.type = 'button';
+      quick.onclick = () => {
+        byId('search-kind').value = place ? 'departures' : 'trip';
+        updateSearchKind();
+        choose('from', place || from);
+        if (to) choose('to', to);
+        byId('direction').value = 'false';
+        byId('now').click();
+        byId('planner').requestSubmit();
+      };
+      row.append(quick);
+    }
+    row.append(remove);
     return row;
   }));
   const manager = byId('favorite-manager');
@@ -448,6 +464,37 @@ function renderFavorites() {
   manager.hidden = !favorites.length;
   refreshFavoriteButtons();
 }
+
+const recentKey = 'privatnavigator.recent-routes';
+let recentRoutes = [];
+try {
+  const data = JSON.parse(localStorage.getItem(recentKey));
+  if (Array.isArray(data)) recentRoutes = data.filter(item => item?.from?.id && item?.to?.id).slice(0, 6);
+} catch {}
+function renderRecentRoutes() {
+  byId('recent-routes').hidden = !recentRoutes.length;
+  byId('recent-route-list').replaceChildren(...recentRoutes.map(({ from, to }) => {
+    const button = element('button', from.name + ' → ' + to.name);
+    button.type = 'button';
+    button.onclick = () => {
+      byId('search-kind').value = 'trip';
+      updateSearchKind();
+      choose('from', from);
+      choose('to', to);
+      byId('direction').value = 'false';
+      byId('now').click();
+      byId('planner').requestSubmit();
+    };
+    return button;
+  }));
+}
+function storeRecentRoutes(items) {
+  recentRoutes = items;
+  try { localStorage.setItem(recentKey, JSON.stringify(items)); } catch {}
+  renderRecentRoutes();
+}
+byId('clear-recent').onclick = () => storeRecentRoutes([]);
+renderRecentRoutes();
 
 byId('add-favorite').onsubmit = async (event) => {
   event.preventDefault();
@@ -895,6 +942,16 @@ function renderJourney(journey, settings = {}) {
     return row;
   }));
   details.append(summary, mapButton, steps);
+  const share = element('button', 'Fahrt teilen', 'calendar-link');
+  share.type = 'button';
+  share.onclick = async () => {
+    const text = journey.legs.map(leg => timeLabel(leg.startTime) + ' ' + leg.from.name + ' → ' + timeLabel(leg.endTime) + ' ' + leg.to.name + ' · ' + lineName(leg)).join('\n');
+    try {
+      if (navigator.share) await navigator.share({ title: calendar.format(new Date(journey.startTime)) + ' · Fahrplan', text });
+      else { await navigator.clipboard.writeText(calendar.format(new Date(journey.startTime)) + '\n' + text); share.textContent = 'Fahrt kopiert'; }
+    } catch (error) { if (error.name !== 'AbortError') share.textContent = 'Teilen fehlgeschlagen · erneut versuchen'; }
+  };
+  details.append(share);
   if (checkAlternatives) {
     const check = renderTransferCheck(journey, from, to, options);
     if (check) details.append(check);
@@ -1273,6 +1330,28 @@ function renderSavedTrip(trip) {
   const details = renderJourney(trip.journey, { ...trip, saved: true });
   details.open = true;
   details.classList.add('static-journey');
+  const cockpit = element('section', null, 'ride-progress');
+  const tripProgress = () => {
+    const now = Date.now();
+    const legs = trip.journey.legs;
+    const leg = legs.find(item => Date.parse(item.endTime) > now);
+    cockpit.hidden = !leg || isCancelled(trip.journey);
+    if (cockpit.hidden) return;
+    const before = Date.parse(leg.startTime) > now;
+    const stop = before ? leg.from : (leg.intermediateStops || []).find(item =>
+      !item.cancelled && Date.parse(item.arrival || item.departure) > now) || leg.to;
+    const when = before ? leg.startTime : stop.arrival || leg.endTime;
+    const remaining = Math.max(0, Math.ceil((Date.parse(when) - now) / 60000));
+    const title = before ? 'Nächster Abschnitt' : leg.mode === 'WALK' ? 'Fußweg zum Ziel des Abschnitts' : 'Nächster Halt laut Fahrtverlauf';
+    const progress = element('progress');
+    progress.max = Math.max(1, Date.parse(trip.journey.endTime) - Date.parse(trip.journey.startTime));
+    progress.value = Math.min(progress.max, Math.max(0, now - Date.parse(trip.journey.startTime)));
+    progress.setAttribute('aria-label', 'Zeitlicher Fahrtfortschritt');
+    cockpit.replaceChildren(element('small', title), element('strong', stop.name + ' · ' + timeLabel(when)),
+      element('span', lineName(leg) + ' · ' + (remaining < 60 ? 'in ' + remaining + ' Min.' : dateTimeLabel.format(new Date(when)))), progress);
+  };
+  cockpit.updateProgress = tripProgress;
+  tripProgress();
   const actions = element('div', null, 'trip-actions');
   const refresh = element('button', 'Live aktualisieren');
   const remove = element('button', 'Entfernen');
@@ -1355,7 +1434,7 @@ function renderSavedTrip(trip) {
     setTimeout(() => URL.revokeObjectURL(file), 1000);
   };
   actions.append(calendarLink);
-  card.append(heading, stamp, details, actions, status);
+  card.append(heading, stamp, cockpit, details, actions, status);
   return card;
 }
 
@@ -1460,6 +1539,15 @@ for (const event of ['online', 'offline']) window.addEventListener(event, () => 
 });
 openTripLink();
 
+const comparison = setupComparison(() => displayedJourneys, (visible) => {
+  const list = byId('journeys');
+  const cards = new Map([...list.children].map(card => [card.dataset.journeyId, card]));
+  for (const card of cards.values()) card.hidden = true;
+  for (const trip of visible) {
+    const card = cards.get(trip.id);
+    if (card) { card.hidden = false; list.append(card); }
+  }
+});
 const paging = { earlier: byId('earlier-trips'), later: byId('later-trips') };
 
 function renderBoardEvent(event) {
@@ -1500,6 +1588,10 @@ async function showTripPage(query, controller, direction) {
     }, controller.signal);
     if (controller.signal.aborted) return;
     if (direction && cursor && page[direction] === cursor) page[direction] = null;
+    if (!direction && !query.board && query.from.type === 'STOP' && query.to.type === 'STOP') {
+      storeRecentRoutes([{ from: query.from, to: query.to }, ...recentRoutes.filter(item =>
+        item.from.id !== query.from.id || item.to.id !== query.to.id)].slice(0, 6));
+    }
     tripPage = direction ? { ...tripPage, [direction]: page[direction] } : page;
     query.cursor = cursor;
     const list = byId('journeys');
@@ -1527,6 +1619,8 @@ async function showTripPage(query, controller, direction) {
       card.open = openIds.has(journey.id);
       return card;
     }));
+    byId('connection-tools').hidden = false;
+    comparison.apply();
     if (oldId) {
       const same = [...list.children].find(node => node.dataset.journeyId === oldId);
       if (same) window.scrollBy(0, same.getBoundingClientRect().top - offset);
@@ -1579,6 +1673,7 @@ byId('planner').addEventListener('submit', async (event) => {
   updatePaging();
   setStatus('form-status', '');
   resultsReady = true;
+  byId('connection-tools').hidden = true;
   const resultTitle = board ? byId('search-kind').selectedOptions[0].text : 'Verbindungen';
   byId('results-title').textContent = resultTitle;
   byId('results').toggleAttribute('data-board', board);
@@ -1689,4 +1784,8 @@ window.addEventListener('online', refreshVisibleData);
 window.addEventListener('online', () => void syncBudgetPush(budgetPush).catch(reportBudgetPushError));
 if (currentView === 'search-view' || currentView === 'saved-trips') refreshVisibleData();
 
-setInterval(() => { if (document.visibilityState === 'visible') renderSavedTrips(); }, 60_000);
+setInterval(() => {
+  if (document.visibilityState !== 'visible') return;
+  renderSavedTrips();
+  document.querySelector('.ride-progress')?.updateProgress();
+}, 60_000);

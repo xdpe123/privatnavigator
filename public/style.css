@@ -356,3 +356,21 @@ a { color: var(--accent); }
 .analysis-track span { display: block; height: 100%; background: var(--accent); }
 .analysis-history { list-style: none; padding: 0; }
 .analysis-history li { display: grid; gap: .3rem; font-size: .85rem; padding: .7rem 0; border-top: 1px solid var(--line); }
+
+.connection-tools summary { cursor: pointer; font-weight: 700; }
+.connection-tools summary small { float: right; color: var(--muted); }
+#connection-preferences { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .8rem; margin: 1rem 0; }
+#connection-preferences select { display: block; width: 100%; margin-top: .25rem; }
+#comparison { width: min(32rem,94vw); max-height: 85dvh; overflow: auto; }
+#comparison article { padding: 1rem 0; border-top: 1px solid var(--line); }
+#comparison small { color: var(--accent); }
+#comparison h3 { margin-top: .3rem; }
+.favorite-row { flex-wrap: wrap; }
+
+.ride-progress { margin: .75rem 0; padding: 1rem; display: grid; gap: .3rem; border-inline-start: 3px solid var(--accent); background: var(--surface); }
+.ride-progress small, .ride-progress span { color: var(--muted); }
+.ride-progress progress { width: 100%; height: .4rem; accent-color: var(--accent); margin-top: .4rem; }
+
+#recent-routes summary { font-weight: 650; cursor: pointer; }
+#recent-route-list { display: grid; gap: .4rem; margin: .75rem 0; }
+#recent-route-list button { text-align: start; }

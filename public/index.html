@@ -74,6 +74,7 @@
       <p id="filter-summary" class="muted" hidden></p>
       <p id="form-status" role="status" hidden></p>
     </form>
+    <details id="recent-routes" class="panel" hidden><summary>Letzte Streckensuchen</summary><div id="recent-route-list"></div><button id="clear-recent" type="button">Suchverlauf leeren</button></details>
     <section id="favorites" class="panel" aria-labelledby="favorites-title">
       <div class="section-heading"><h2 id="favorites-title">Favoriten</h2><a href="#favoriten">Verwalten</a></div>
       <div id="favorite-items" class="favorite-items"></div>
@@ -98,6 +99,18 @@
         <p id="query-time"></p>
         <p id="query-filters" class="muted" hidden></p>
       </div>
+      <details id="connection-tools" class="panel connection-tools" hidden>
+        <summary>Verbindungen vergleichen <small id="match-count"></small></summary>
+        <form id="connection-preferences">
+          <label>Reihenfolge<select name="order"><option value="departure">Abfahrt</option><option value="arrival">Früheste Ankunft</option><option value="duration">Kürzeste Fahrzeit</option><option value="walk">Wenig Fußweg</option><option value="transfers">Wenige Umstiege</option></select></label>
+          <label>Umstiege<select name="changes"><option value="">Beliebig</option><option value="0">Direktfahrt</option><option value="1">Höchstens einer</option><option value="2">Höchstens zwei</option></select></label>
+          <label>Zeitreserve je Anschluss<select name="buffer"><option value="">Beliebig</option><option value="3">Mindestens 3 Min.</option><option value="5">Mindestens 5 Min.</option><option value="10">Mindestens 10 Min.</option><option value="15">Mindestens 15 Min.</option></select></label>
+          <label>Fußweg insgesamt<select name="walking"><option value="">Beliebig</option><option value="5">Bis 5 Min.</option><option value="10">Bis 10 Min.</option><option value="20">Bis 20 Min.</option></select></label>
+          <button type="reset">Zurücksetzen</button>
+        </form>
+        <button id="compare-routes" type="button">Beste Optionen gegenüberstellen</button>
+      </details>
+      <dialog id="comparison"><h2>Verbindungen im Vergleich</h2><div id="comparison-body"></div><form method="dialog"><button>Schließen</button></form></dialog>
       <p id="result-status" role="status"></p>
       <button type="button" id="earlier-trips" class="trip-page" hidden>↑ Frühere Verbindungen</button>
       <div id="journeys"></div>
